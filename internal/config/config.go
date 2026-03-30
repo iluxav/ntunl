@@ -67,6 +67,18 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	return &cfg, nil
 }
 
+func SaveServerConfig(path string, cfg *ServerConfig) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	return os.WriteFile(path, data, 0600)
+}
+
 func SaveClientConfig(path string, cfg *ClientConfig) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
