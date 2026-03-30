@@ -1,0 +1,24 @@
+# etunl client config
+# Place at ~/.etunl/config.yaml
+
+server: tunnel.etunl.com
+token: "change-me"
+
+routes:
+  - name: app
+    type: http
+    target: localhost:3030
+
+  - name: server
+    type: http
+    target: localhost:3000
+
+  - name: db1
+    type: tcp
+    target: localhost:5432
+    local_port: 15432
+
+  - name: db2
+    type: tcp
+    target: localhost:5433
+    local_port: 15433
