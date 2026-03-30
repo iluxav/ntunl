@@ -44,11 +44,31 @@ func (s *Server) Start() error {
 // Requests to /tunnel are the tunnel WebSocket endpoint.
 // All other requests are proxied based on subdomain.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/tunnel" {
+	switch r.URL.Path {
+	case "/tunnel":
 		s.handleTunnel(w, r)
-		return
+	case "/health":
+		s.handleHealth(w, r)
+	default:
+		s.handleHTTPProxy(w, r)
 	}
-	s.handleHTTPProxy(w, r)
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	connected := s.conn != nil
+	routeCount := len(s.routes)
+	routes := make([]tunnel.RouteInfo, len(s.routes))
+	copy(routes, s.routes)
+	s.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":          "ok",
+		"tunnel_connected": connected,
+		"routes":           routeCount,
+		"route_list":       routes,
+	})
 }
 
 func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
