@@ -70,8 +70,125 @@ fi
 
 chmod +x "${INSTALL_DIR}/${BINARY}"
 
+echo ""
 echo "etunl ${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
 echo ""
-echo "Get started:"
-echo "  etunl --help"
-echo "  cp config.example.yaml ~/.etunl/config.yaml"
+
+# --- Interactive setup ---
+
+printf "Would you like to configure etunl now? [Y/n] "
+read -r SETUP_ANSWER
+case "$SETUP_ANSWER" in
+  [nN]*) echo "Skipping setup. Run 'etunl init --help' to configure later."; exit 0 ;;
+esac
+
+# Ask for mode
+printf "Setup mode — (s)erver or (c)lient? [c] "
+read -r MODE_ANSWER
+case "$MODE_ANSWER" in
+  [sS]*) MODE="server" ;;
+  *)     MODE="client" ;;
+esac
+
+if [ "$MODE" = "server" ]; then
+  printf "HTTP listen port [80]: "
+  read -r HTTP_PORT
+  HTTP_PORT="${HTTP_PORT:-80}"
+
+  printf "TCP listen port [15432]: "
+  read -r TCP_PORT
+  TCP_PORT="${TCP_PORT:-15432}"
+
+  etunl init --mode server
+  echo ""
+  echo "Server config created. Copy the token above and use it on the client."
+  echo "Start the server with: etunl server"
+
+else
+  printf "Server address (e.g. etunl.com): "
+  read -r SERVER_ADDR
+  if [ -z "$SERVER_ADDR" ]; then
+    echo "Server address is required."
+    exit 1
+  fi
+
+  printf "Auth token (from server): "
+  read -r TOKEN
+  if [ -z "$TOKEN" ]; then
+    echo "Token is required."
+    exit 1
+  fi
+
+  etunl init --mode client --server "$SERVER_ADDR" "$TOKEN"
+  echo ""
+fi
+
+# --- systemd service (Linux only) ---
+
+if [ "$OS" != "linux" ]; then
+  echo "Done! Start etunl with: etunl ${MODE}"
+  exit 0
+fi
+
+if ! command -v systemctl > /dev/null 2>&1; then
+  echo "systemd not found. Start etunl manually: etunl ${MODE}"
+  exit 0
+fi
+
+printf "Install as systemd service? [Y/n] "
+read -r SERVICE_ANSWER
+case "$SERVICE_ANSWER" in
+  [nN]*) echo "Done! Start etunl with: etunl ${MODE}"; exit 0 ;;
+esac
+
+# Determine user for the service
+ETUNL_USER=$(whoami)
+ETUNL_HOME=$(eval echo "~${ETUNL_USER}")
+
+if [ "$MODE" = "client" ]; then
+  DASHBOARD_FLAG="--dashboard :8080"
+else
+  DASHBOARD_FLAG=""
+fi
+
+cat > /tmp/etunl.service <<EOF
+[Unit]
+Description=etunl tunnel ${MODE}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${ETUNL_USER}
+ExecStart=${INSTALL_DIR}/${BINARY} ${MODE} ${DASHBOARD_FLAG}
+Restart=always
+RestartSec=5
+Environment=HOME=${ETUNL_HOME}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+if [ -w "/etc/systemd/system" ]; then
+  mv /tmp/etunl.service /etc/systemd/system/etunl.service
+else
+  sudo mv /tmp/etunl.service /etc/systemd/system/etunl.service
+fi
+
+sudo systemctl daemon-reload
+sudo systemctl enable etunl
+sudo systemctl start etunl
+
+echo ""
+echo "etunl is running as a systemd service."
+echo ""
+echo "Useful commands:"
+echo "  sudo systemctl status etunl    — check status"
+echo "  sudo journalctl -u etunl -f    — view logs"
+echo "  sudo systemctl restart etunl   — restart"
+echo "  sudo systemctl stop etunl      — stop"
+if [ "$MODE" = "client" ]; then
+  echo ""
+  echo "Dashboard: http://localhost:8080"
+  echo "Remote:    https://admin.${SERVER_ADDR}"
+fi
