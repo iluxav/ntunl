@@ -15,38 +15,39 @@ import (
 func (c *Client) handleHTTPStream(s *tunnel.Stream, route *config.Route) {
 	defer c.conn.Mux().CloseStream(s.ID)
 
-	// Collect request data from stream
-	var reqBuf bytes.Buffer
-	for {
-		select {
-		case data, ok := <-s.DataCh:
-			if !ok {
+	// Bridge stream data channel into an io.Reader via pipe
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		for {
+			select {
+			case data, ok := <-s.DataCh:
+				if !ok {
+					return
+				}
+				if _, err := pw.Write(data); err != nil {
+					return
+				}
+			case <-s.Done:
 				return
 			}
-			reqBuf.Write(data)
-
-			// Try to parse as complete HTTP request
-			req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(reqBuf.Bytes())))
-			if err != nil {
-				continue // need more data
-			}
-
-			// Forward to local target
-			c.forwardHTTP(s, req, route)
-			return
-
-		case <-s.Done:
-			return
 		}
+	}()
+
+	// Parse the HTTP request from the pipe
+	req, err := http.ReadRequest(bufio.NewReader(pr))
+	if err != nil {
+		log.Printf("failed to read HTTP request from stream: %v", err)
+		return
 	}
+
+	c.forwardHTTP(s, req, route)
 }
 
 func (c *Client) forwardHTTP(s *tunnel.Stream, req *http.Request, route *config.Route) {
-	// Dial the local target
 	targetConn, err := net.Dial("tcp", route.Target)
 	if err != nil {
 		log.Printf("failed to dial %s: %v", route.Target, err)
-		// Send 502 back
 		resp := &http.Response{
 			StatusCode: http.StatusBadGateway,
 			Status:     "502 Bad Gateway",
@@ -63,7 +64,6 @@ func (c *Client) forwardHTTP(s *tunnel.Stream, req *http.Request, route *config.
 	}
 	defer targetConn.Close()
 
-	// Write request to target
 	if err := req.Write(targetConn); err != nil {
 		log.Printf("failed to write request to %s: %v", route.Target, err)
 		return

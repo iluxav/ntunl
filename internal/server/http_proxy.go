@@ -2,7 +2,6 @@ package server
 
 import (
 	"bufio"
-	"bytes"
 	"io"
 	"net/http"
 	"strings"
@@ -39,72 +38,71 @@ func (s *Server) handleHTTPProxy(w http.ResponseWriter, r *http.Request) {
 	defer conn.Mux().CloseStream(stream.ID)
 
 	// Serialize the HTTP request and send through tunnel
-	var reqBuf bytes.Buffer
-	if err := r.Write(&reqBuf); err != nil {
-		http.Error(w, "failed to serialize request", http.StatusInternalServerError)
-		return
-	}
-	if err := conn.Mux().SendData(stream.ID, reqBuf.Bytes()); err != nil {
-		http.Error(w, "failed to send request through tunnel", http.StatusBadGateway)
-		return
-	}
-
-	// Read response from tunnel
-	var respBuf bytes.Buffer
-	for {
-		select {
-		case data, ok := <-stream.DataCh:
-			if !ok {
-				http.Error(w, "stream closed unexpectedly", http.StatusBadGateway)
-				return
-			}
-			respBuf.Write(data)
-
-			// Try to parse as HTTP response
-			resp, err := http.ReadResponse(bufio.NewReader(&respBuf), r)
-			if err != nil {
-				continue // need more data
-			}
-			defer resp.Body.Close()
-
-			// Copy response headers
-			for k, vv := range resp.Header {
-				for _, v := range vv {
-					w.Header().Add(k, v)
-				}
-			}
-			w.WriteHeader(resp.StatusCode)
-			io.Copy(w, resp.Body)
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		if err := r.Write(pw); err != nil {
 			return
+		}
+	}()
 
-		case <-stream.Done:
-			if respBuf.Len() > 0 {
-				// Try one last parse
-				resp, err := http.ReadResponse(bufio.NewReader(&respBuf), r)
-				if err == nil {
-					defer resp.Body.Close()
-					for k, vv := range resp.Header {
-						for _, v := range vv {
-							w.Header().Add(k, v)
-						}
-					}
-					w.WriteHeader(resp.StatusCode)
-					io.Copy(w, resp.Body)
+	// Send request body through tunnel
+	go func() {
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := pr.Read(buf)
+			if n > 0 {
+				if sendErr := conn.Mux().SendData(stream.ID, buf[:n]); sendErr != nil {
 					return
 				}
 			}
-			http.Error(w, "tunnel stream closed", http.StatusBadGateway)
-			return
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Bridge stream data channel into an io.Reader via pipe
+	respPR, respPW := io.Pipe()
+	go func() {
+		defer respPW.Close()
+		for {
+			select {
+			case data, ok := <-stream.DataCh:
+				if !ok {
+					return
+				}
+				if _, err := respPW.Write(data); err != nil {
+					return
+				}
+			case <-stream.Done:
+				return
+			}
+		}
+	}()
+
+	// Parse HTTP response from the pipe reader
+	resp, err := http.ReadResponse(bufio.NewReader(respPR), r)
+	if err != nil {
+		http.Error(w, "bad gateway: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy response headers
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
 		}
 	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 func extractSubdomain(host string) string {
-	// Remove port if present
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
-
 	parts := strings.SplitN(host, ".", 2)
 	if len(parts) < 2 {
 		return ""
