@@ -9,10 +9,10 @@ import (
 )
 
 type Route struct {
-	Name      string `yaml:"name"`
-	Type      string `yaml:"type"` // "http" or "tcp"
-	Target    string `yaml:"target"`
-	LocalPort int    `yaml:"local_port,omitempty"`
+	Name      string `yaml:"name" json:"name"`
+	Type      string `yaml:"type" json:"type"`
+	Target    string `yaml:"target" json:"target"`
+	LocalPort int    `yaml:"local_port,omitempty" json:"local_port,omitempty"`
 }
 
 type ClientConfig struct {

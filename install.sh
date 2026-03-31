@@ -74,53 +74,78 @@ echo ""
 echo "etunl ${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
 echo ""
 
-# --- Interactive setup ---
+# --- Upgrade: restart existing service ---
 
-printf "Would you like to configure etunl now? [Y/n] "
-read -r SETUP_ANSWER < /dev/tty
-case "$SETUP_ANSWER" in
-  [nN]*) echo "Skipping setup. Run 'etunl init --help' to configure later."; exit 0 ;;
-esac
+if [ "$OS" = "linux" ] && command -v systemctl > /dev/null 2>&1; then
+  if systemctl is-active --quiet etunl 2>/dev/null; then
+    echo "Existing etunl service detected. Restarting..."
+    sudo systemctl restart etunl
+    echo "etunl service restarted with ${VERSION}."
+    exit 0
+  fi
+fi
 
-# Ask for mode
-printf "Setup mode — (s)erver or (c)lient? [c] "
-read -r MODE_ANSWER < /dev/tty
-case "$MODE_ANSWER" in
-  [sS]*) MODE="server" ;;
-  *)     MODE="client" ;;
-esac
+# --- Skip setup if config already exists ---
 
-if [ "$MODE" = "server" ]; then
-  printf "HTTP listen port [80]: "
-  read -r HTTP_PORT < /dev/tty
-  HTTP_PORT="${HTTP_PORT:-80}"
+HOME_DIR=$(eval echo "~$(whoami)")
+CLIENT_CFG="${HOME_DIR}/.etunl/config.yaml"
+SERVER_CFG="${HOME_DIR}/.etunl/server.yaml"
 
-  printf "TCP listen port [15432]: "
-  read -r TCP_PORT < /dev/tty
-  TCP_PORT="${TCP_PORT:-15432}"
-
-  etunl init --mode server
-  echo ""
-  echo "Server config created. Copy the token above and use it on the client."
-  echo "Start the server with: etunl server"
-
+if [ -f "$CLIENT_CFG" ]; then
+  echo "Config found at ${CLIENT_CFG} — skipping setup."
+  MODE="client"
+elif [ -f "$SERVER_CFG" ]; then
+  echo "Config found at ${SERVER_CFG} — skipping setup."
+  MODE="server"
 else
-  printf "Server address (e.g. etunl.com): "
-  read -r SERVER_ADDR < /dev/tty
-  if [ -z "$SERVER_ADDR" ]; then
-    echo "Server address is required."
-    exit 1
-  fi
+  # --- Interactive setup ---
 
-  printf "Auth token (from server): "
-  read -r TOKEN < /dev/tty
-  if [ -z "$TOKEN" ]; then
-    echo "Token is required."
-    exit 1
-  fi
+  printf "Would you like to configure etunl now? [Y/n] "
+  read -r SETUP_ANSWER < /dev/tty
+  case "$SETUP_ANSWER" in
+    [nN]*) echo "Skipping setup. Run 'etunl init --help' to configure later."; exit 0 ;;
+  esac
 
-  etunl init --mode client --server "$SERVER_ADDR" "$TOKEN"
-  echo ""
+  # Ask for mode
+  printf "Setup mode — (s)erver or (c)lient? [c] "
+  read -r MODE_ANSWER < /dev/tty
+  case "$MODE_ANSWER" in
+    [sS]*) MODE="server" ;;
+    *)     MODE="client" ;;
+  esac
+
+  if [ "$MODE" = "server" ]; then
+    printf "HTTP listen port [80]: "
+    read -r HTTP_PORT < /dev/tty
+    HTTP_PORT="${HTTP_PORT:-80}"
+
+    printf "TCP listen port [15432]: "
+    read -r TCP_PORT < /dev/tty
+    TCP_PORT="${TCP_PORT:-15432}"
+
+    etunl init --mode server
+    echo ""
+    echo "Server config created. Copy the token above and use it on the client."
+    echo "Start the server with: etunl server"
+
+  else
+    printf "Server address (e.g. etunl.com): "
+    read -r SERVER_ADDR < /dev/tty
+    if [ -z "$SERVER_ADDR" ]; then
+      echo "Server address is required."
+      exit 1
+    fi
+
+    printf "Auth token (from server): "
+    read -r TOKEN < /dev/tty
+    if [ -z "$TOKEN" ]; then
+      echo "Token is required."
+      exit 1
+    fi
+
+    etunl init --mode client --server "$SERVER_ADDR" "$TOKEN"
+    echo ""
+  fi
 fi
 
 # --- systemd service (Linux only) ---
