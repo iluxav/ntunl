@@ -77,14 +77,14 @@ echo ""
 # --- Interactive setup ---
 
 printf "Would you like to configure etunl now? [Y/n] "
-read -r SETUP_ANSWER
+read -r SETUP_ANSWER < /dev/tty
 case "$SETUP_ANSWER" in
   [nN]*) echo "Skipping setup. Run 'etunl init --help' to configure later."; exit 0 ;;
 esac
 
 # Ask for mode
 printf "Setup mode — (s)erver or (c)lient? [c] "
-read -r MODE_ANSWER
+read -r MODE_ANSWER < /dev/tty
 case "$MODE_ANSWER" in
   [sS]*) MODE="server" ;;
   *)     MODE="client" ;;
@@ -92,11 +92,11 @@ esac
 
 if [ "$MODE" = "server" ]; then
   printf "HTTP listen port [80]: "
-  read -r HTTP_PORT
+  read -r HTTP_PORT < /dev/tty
   HTTP_PORT="${HTTP_PORT:-80}"
 
   printf "TCP listen port [15432]: "
-  read -r TCP_PORT
+  read -r TCP_PORT < /dev/tty
   TCP_PORT="${TCP_PORT:-15432}"
 
   etunl init --mode server
@@ -106,14 +106,14 @@ if [ "$MODE" = "server" ]; then
 
 else
   printf "Server address (e.g. etunl.com): "
-  read -r SERVER_ADDR
+  read -r SERVER_ADDR < /dev/tty
   if [ -z "$SERVER_ADDR" ]; then
     echo "Server address is required."
     exit 1
   fi
 
   printf "Auth token (from server): "
-  read -r TOKEN
+  read -r TOKEN < /dev/tty
   if [ -z "$TOKEN" ]; then
     echo "Token is required."
     exit 1
@@ -136,7 +136,7 @@ if ! command -v systemctl > /dev/null 2>&1; then
 fi
 
 printf "Install as systemd service? [Y/n] "
-read -r SERVICE_ANSWER
+read -r SERVICE_ANSWER < /dev/tty
 case "$SERVICE_ANSWER" in
   [nN]*) echo "Done! Start etunl with: etunl ${MODE}"; exit 0 ;;
 esac
