@@ -74,6 +74,19 @@ echo ""
 echo "etunl ${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
 echo ""
 
+# --- Detect existing config ---
+
+HOME_DIR=$(eval echo "~$(whoami)")
+CLIENT_CFG="${HOME_DIR}/.etunl/config.yaml"
+SERVER_CFG="${HOME_DIR}/.etunl/server.yaml"
+EXISTING_CONFIG=""
+
+if [ -f "$CLIENT_CFG" ]; then
+  EXISTING_CONFIG="client"
+elif [ -f "$SERVER_CFG" ]; then
+  EXISTING_CONFIG="server"
+fi
+
 # --- Upgrade: restart existing service ---
 
 if [ "$OS" = "linux" ] && command -v systemctl > /dev/null 2>&1; then
@@ -87,16 +100,9 @@ fi
 
 # --- Skip setup if config already exists ---
 
-HOME_DIR=$(eval echo "~$(whoami)")
-CLIENT_CFG="${HOME_DIR}/.etunl/config.yaml"
-SERVER_CFG="${HOME_DIR}/.etunl/server.yaml"
-
-if [ -f "$CLIENT_CFG" ]; then
-  echo "Config found at ${CLIENT_CFG} — skipping setup."
-  MODE="client"
-elif [ -f "$SERVER_CFG" ]; then
-  echo "Config found at ${SERVER_CFG} — skipping setup."
-  MODE="server"
+if [ -n "$EXISTING_CONFIG" ]; then
+  echo "Config found — skipping setup."
+  MODE="$EXISTING_CONFIG"
 else
   # --- Interactive setup ---
 
@@ -205,7 +211,7 @@ sudo systemctl enable etunl
 sudo systemctl start etunl
 
 echo ""
-echo "etunl is running as a systemd service."
+echo "etunl is running as a systemd service (${MODE} mode)."
 echo ""
 echo "Useful commands:"
 echo "  sudo systemctl status etunl    — check status"
@@ -213,7 +219,10 @@ echo "  sudo journalctl -u etunl -f    — view logs"
 echo "  sudo systemctl restart etunl   — restart"
 echo "  sudo systemctl stop etunl      — stop"
 if [ "$MODE" = "client" ]; then
-  echo "--------------------------------"
+  echo ""
   echo "Dashboard: http://localhost:8080"
-  echo "Remote:    https://admin.${SERVER_ADDR}"
+fi
+if [ "$MODE" = "server" ]; then
+  echo ""
+  echo "Health check: curl http://localhost/health"
 fi
