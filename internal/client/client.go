@@ -13,14 +13,15 @@ import (
 )
 
 type Client struct {
-	watcher    *config.Watcher
-	configPath string
-	conn       *tunnel.Conn
-	localProxy *LocalProxy
+	watcher       *config.Watcher
+	configPath    string
+	conn          *tunnel.Conn
+	localProxy    *LocalProxy
+	dashboardAddr string
 }
 
-func New(configPath string) (*Client, error) {
-	c := &Client{configPath: configPath}
+func New(configPath string, dashboardAddr string) (*Client, error) {
+	c := &Client{configPath: configPath, dashboardAddr: dashboardAddr}
 
 	watcher, err := config.NewWatcher(configPath, c.onConfigChange)
 	if err != nil {
@@ -42,6 +43,11 @@ func (c *Client) Start() error {
 	// Start local proxy for same-machine access
 	c.localProxy.UpdateRoutes(cfg.Routes)
 	go c.localProxy.Start()
+
+	// Start dashboard
+	if c.dashboardAddr != "" {
+		go c.startDashboard(c.dashboardAddr)
+	}
 
 	// Connect to tunnel server with reconnect
 	c.connectLoop(cfg)

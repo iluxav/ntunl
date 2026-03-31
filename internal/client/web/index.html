@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>etunl</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 2rem; max-width: 800px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #fff; }
+  .status { font-size: 0.85rem; color: #888; margin-bottom: 2rem; }
+  .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .dot.connected { background: #22c55e; }
+  .dot.disconnected { background: #ef4444; }
+
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }
+  th { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid #333; color: #888; font-weight: 500; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  td { padding: 0.6rem 0.8rem; border-bottom: 1px solid #1a1a1a; }
+  tr:hover td { background: #111; }
+  .type { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+  .type.http { background: #1e3a5f; color: #60a5fa; }
+  .type.tcp { background: #3b1f1f; color: #f87171; }
+  .btn-remove { background: none; border: 1px solid #333; color: #888; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+  .btn-remove:hover { border-color: #ef4444; color: #ef4444; }
+
+  .add-form { background: #111; border: 1px solid #222; border-radius: 8px; padding: 1.2rem; }
+  .add-form h2 { font-size: 1rem; margin-bottom: 1rem; color: #ccc; }
+  .form-row { display: flex; gap: 0.8rem; flex-wrap: wrap; align-items: end; }
+  .form-group { display: flex; flex-direction: column; gap: 0.3rem; flex: 1; min-width: 120px; }
+  .form-group label { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em; }
+  .form-group input, .form-group select { background: #0a0a0a; border: 1px solid #333; color: #e0e0e0; padding: 0.5rem; border-radius: 4px; font-size: 0.9rem; }
+  .form-group input:focus, .form-group select:focus { outline: none; border-color: #555; }
+  .btn-add { background: #1e3a5f; border: none; color: #60a5fa; padding: 0.5rem 1.2rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 500; white-space: nowrap; height: 36px; }
+  .btn-add:hover { background: #254b75; }
+  .empty { color: #555; text-align: center; padding: 2rem; }
+  .error { color: #ef4444; font-size: 0.85rem; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+
+<h1>etunl</h1>
+<div class="status" id="status"></div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Type</th>
+      <th>Target</th>
+      <th>Local Port</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody id="routes"></tbody>
+</table>
+
+<div class="add-form">
+  <h2>Add Route</h2>
+  <div class="form-row">
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="name" placeholder="app">
+    </div>
+    <div class="form-group">
+      <label>Type</label>
+      <select id="type">
+        <option value="http">HTTP</option>
+        <option value="tcp">TCP</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Target</label>
+      <input type="text" id="target" placeholder="localhost:3030">
+    </div>
+    <div class="form-group">
+      <label>Local Port</label>
+      <input type="number" id="local_port" placeholder="optional">
+    </div>
+    <button class="btn-add" onclick="addRoute()">Add</button>
+  </div>
+  <div class="error" id="error"></div>
+</div>
+
+<script>
+async function load() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    const dot = data.tunnel_connected ? 'connected' : 'disconnected';
+    const label = data.tunnel_connected ? 'Tunnel connected' : 'Tunnel disconnected';
+    document.getElementById('status').innerHTML = `<span class="dot ${dot}"></span>${label} &middot; ${data.routes} route${data.routes !== 1 ? 's' : ''}`;
+  } catch(e) {
+    document.getElementById('status').innerHTML = '<span class="dot disconnected"></span>Unable to reach client';
+  }
+
+  try {
+    const res = await fetch('/api/routes');
+    const routes = await res.json();
+    const tbody = document.getElementById('routes');
+    if (routes.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">No routes configured</td></tr>';
+      return;
+    }
+    tbody.innerHTML = routes.map(r => `<tr>
+      <td><strong>${esc(r.name)}</strong></td>
+      <td><span class="type ${r.type}">${r.type}</span></td>
+      <td>${esc(r.target)}</td>
+      <td>${r.local_port || '-'}</td>
+      <td><button class="btn-remove" onclick="removeRoute('${esc(r.name)}')">Remove</button></td>
+    </tr>`).join('');
+  } catch(e) {}
+}
+
+async function addRoute() {
+  const errEl = document.getElementById('error');
+  errEl.textContent = '';
+  const body = {
+    name: document.getElementById('name').value,
+    type: document.getElementById('type').value,
+    target: document.getElementById('target').value,
+    local_port: parseInt(document.getElementById('local_port').value) || 0,
+  };
+  if (!body.name || !body.target) { errEl.textContent = 'Name and target are required'; return; }
+  try {
+    const res = await fetch('/api/routes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (!res.ok) { errEl.textContent = await res.text(); return; }
+    document.getElementById('name').value = '';
+    document.getElementById('target').value = '';
+    document.getElementById('local_port').value = '';
+    load();
+  } catch(e) { errEl.textContent = e.message; }
+}
+
+async function removeRoute(name) {
+  await fetch('/api/routes/' + encodeURIComponent(name), { method: 'DELETE' });
+  load();
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

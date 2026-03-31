@@ -1,6 +1,6 @@
 # etunl
 
-A reverse proxy and network tunnel that exposes local services through a public server. Route HTTP services by subdomain and TCP services (databases, etc.) through a single tunnel connection.
+A reverse proxy and network tunnel that exposes local services through a public server. Route HTTP services by subdomain and TCP services (databases, etc.) through a single tunnel connection. Includes a built-in web dashboard for managing routes.
 
 ## Install
 
@@ -34,31 +34,33 @@ Internet → Cloudflare (TLS) → DO Server (etunl server)
                          ┌──────────┼──────────┐
                        :3000      :3030      :5432
                        server      app        db
+                                    │
+                              :8080 dashboard
 ```
 
 - **HTTP**: routed by subdomain via `Host` header (`app.etunl.com` → `localhost:3030`)
 - **TCP**: routed via TLS/SNI on a shared port (`db1.etunl.com:15432` → `localhost:5432`)
+- **Dashboard**: built-in web UI for managing routes (`admin.etunl.com` → `localhost:8080`)
 - **Local access**: `/etc/hosts` + local proxy on the same machine — no tunnel needed
 
 ## Quick Start
 
-Generate a shared token and config files:
-
 ```bash
-# On the server (DO machine)
+# 1. On the server (DO machine)
 etunl init --mode server
+etunl server
 
-# On the client (local machine)
-etunl init --mode client --server tunnel.yourdomain.com
+# 2. On the client (local machine) — use the token from the server
+etunl init --mode client --server etunl.com <token>
+etunl client
 ```
 
-Both commands generate a random 256-bit token. Copy the token from one to the other so they match.
+The client `init` command pre-configures an `admin` route pointing to the built-in dashboard. Once connected, open `https://admin.etunl.com` to manage routes from your browser.
 
-Then add routes and start:
+To add routes via CLI instead:
 
 ```bash
 etunl add --name app --type http --target localhost:3030
-etunl client
 ```
 
 ## Setup
@@ -81,24 +83,24 @@ token: "your-secret-token"
 ### 2. Client (local machine)
 
 ```bash
-etunl init --mode client --server tunnel.yourdomain.com
+etunl init --mode client --server etunl.com <token>
 etunl client
 ```
 
-This creates `~/.etunl/config.yaml`. Make sure the token matches the server. You can also create it manually:
+This creates `~/.etunl/config.yaml` with the provided token and an `admin` route for the dashboard. You can also create it manually:
 
 ```yaml
-server: tunnel.yourdomain.com
+server: etunl.com
 token: "your-secret-token"
 
 routes:
+  - name: admin
+    type: http
+    target: localhost:8080
+
   - name: app
     type: http
     target: localhost:3030
-
-  - name: server
-    type: http
-    target: localhost:3000
 
   - name: db1
     type: tcp
@@ -108,15 +110,16 @@ routes:
 
 ### 3. DNS (Cloudflare)
 
-Add a wildcard DNS record pointing to your DO server:
+Add DNS records pointing to your server:
 
 ```
-*.yourdomain.com  →  A  →  <DO server IP>
+yourdomain.com    →  A  →  <server IP>   (Proxied)
+*.yourdomain.com  →  A  →  <server IP>   (Proxied)
 ```
 
-Enable Cloudflare proxy for free TLS.
+Set SSL/TLS mode to **Flexible** (Cloudflare handles TLS, server listens on HTTP).
 
-### 4. Local access (same machine)
+### 4. Local access (same machine as client)
 
 Add to `/etc/hosts`:
 
@@ -127,12 +130,35 @@ Add to `/etc/hosts`:
 
 HTTP routes are available via subdomain on port 80. TCP routes are available on their configured `local_port`.
 
-## Usage
+## Dashboard
 
-### Manage routes
+The client includes a built-in web dashboard for managing routes. It starts automatically on port 8080.
+
+- **Locally**: `http://localhost:8080`
+- **Remotely**: `https://admin.yourdomain.com` (pre-configured by `etunl init`)
+
+From the dashboard you can:
+- View tunnel connection status
+- See all configured routes
+- Add new routes
+- Remove existing routes
+
+Changes are saved to the config file and hot-reloaded — no restart needed.
 
 ```bash
-# Add a route
+# Custom dashboard port
+etunl client --dashboard :9090
+
+# Disable dashboard
+etunl client --dashboard ""
+```
+
+## Usage
+
+### Manage routes (CLI)
+
+```bash
+# Add an HTTP route
 etunl add --name api --type http --target localhost:8080
 
 # Add a TCP route
@@ -157,13 +183,23 @@ etunl connect --name db1 --local-port 5432
 
 Then connect your client (DBeaver, psql, etc.) to `localhost:5432`.
 
+### Health check
+
+The server exposes a health endpoint:
+
+```bash
+curl https://yourdomain.com/health
+```
+
+Returns tunnel status, connected routes, and route details.
+
 ## Commands
 
 | Command | Description |
 |---|---|
-| `etunl init` | Generate config with a secret token |
+| `etunl init [token]` | Initialize config with a token (generates one if not provided) |
 | `etunl server` | Run the tunnel server on a public machine |
-| `etunl client` | Run the tunnel client on your local machine |
+| `etunl client` | Run the tunnel client with dashboard on local machine |
 | `etunl connect` | Tunnel a local port to a remote TCP service |
 | `etunl add` | Add a route to the config |
 | `etunl remove` | Remove a route from the config |

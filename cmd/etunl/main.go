@@ -42,15 +42,20 @@ func initCmd() *cobra.Command {
 		mode       string
 	)
 	cmd := &cobra.Command{
-		Use:   "init",
-		Short: "Initialize config with a generated secret token",
+		Use:   "init [token]",
+		Short: "Initialize config with a secret token (generates one if not provided)",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Generate token
-			tokenBytes := make([]byte, 32)
-			if _, err := rand.Read(tokenBytes); err != nil {
-				return fmt.Errorf("generate token: %w", err)
+			var token string
+			if len(args) > 0 {
+				token = args[0]
+			} else {
+				tokenBytes := make([]byte, 32)
+				if _, err := rand.Read(tokenBytes); err != nil {
+					return fmt.Errorf("generate token: %w", err)
+				}
+				token = hex.EncodeToString(tokenBytes)
 			}
-			token := hex.EncodeToString(tokenBytes)
 
 			if mode == "server" {
 				if cfgPath == "" {
@@ -75,7 +80,13 @@ func initCmd() *cobra.Command {
 				cfg := &config.ClientConfig{
 					Server: serverAddr,
 					Token:  token,
-					Routes: []config.Route{},
+					Routes: []config.Route{
+						{
+							Name:   "admin",
+							Type:   "http",
+							Target: "localhost:8080",
+						},
+					},
 				}
 				if err := config.SaveClientConfig(cfgPath, cfg); err != nil {
 					return err
@@ -116,7 +127,10 @@ func serverCmd() *cobra.Command {
 }
 
 func clientCmd() *cobra.Command {
-	var cfgPath string
+	var (
+		cfgPath       string
+		dashboardAddr string
+	)
 	cmd := &cobra.Command{
 		Use:   "client",
 		Short: "Run the tunnel client (on local machine)",
@@ -124,7 +138,7 @@ func clientCmd() *cobra.Command {
 			if cfgPath == "" {
 				cfgPath = config.DefaultConfigPath()
 			}
-			c, err := client.New(cfgPath)
+			c, err := client.New(cfgPath, dashboardAddr)
 			if err != nil {
 				return fmt.Errorf("init client: %w", err)
 			}
@@ -132,6 +146,7 @@ func clientCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "client config path")
+	cmd.Flags().StringVar(&dashboardAddr, "dashboard", ":8080", "dashboard listen address (empty to disable)")
 	return cmd
 }
 
