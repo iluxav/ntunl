@@ -188,7 +188,7 @@ echo "  sudo journalctl -u etunl -f    — view logs"
 echo "  sudo systemctl restart etunl   — restart"
 echo "  sudo systemctl stop etunl      — stop"
 if [ "$MODE" = "client" ]; then
-  echo ""
+  echo "--------------------------------"
   echo "Dashboard: http://localhost:8080"
   echo "Remote:    https://admin.${SERVER_ADDR}"
 fi
