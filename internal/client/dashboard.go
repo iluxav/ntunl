@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"io"
@@ -14,16 +15,29 @@ import (
 //go:embed web/index.html
 var webFS embed.FS
 
+func (c *Client) basicAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, pass, ok := r.BasicAuth()
+		cfg := c.watcher.Config()
+		if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(cfg.Token)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="etunl"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func (c *Client) startDashboard(addr string) {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", c.basicAuth(func(w http.ResponseWriter, r *http.Request) {
 		data, _ := webFS.ReadFile("web/index.html")
 		w.Header().Set("Content-Type", "text/html")
 		w.Write(data)
-	})
+	}))
 
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/status", c.basicAuth(func(w http.ResponseWriter, r *http.Request) {
 		cfg := c.watcher.Config()
 		connected := c.conn != nil
 		w.Header().Set("Content-Type", "application/json")
@@ -32,9 +46,9 @@ func (c *Client) startDashboard(addr string) {
 			"routes":           len(cfg.Routes),
 			"server":           cfg.Server,
 		})
-	})
+	}))
 
-	mux.HandleFunc("/api/routes", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/routes", c.basicAuth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			cfg := c.watcher.Config()
@@ -74,9 +88,9 @@ func (c *Client) startDashboard(addr string) {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
+	}))
 
-	mux.HandleFunc("/api/routes/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/routes/", c.basicAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -97,7 +111,7 @@ func (c *Client) startDashboard(addr string) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	})
+	}))
 
 	log.Printf("dashboard on http://localhost%s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
