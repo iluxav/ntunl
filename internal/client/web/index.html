@@ -47,7 +47,6 @@
       <th>Name</th>
       <th>Type</th>
       <th>Target</th>
-      <th>Local Port</th>
       <th>Server Port</th>
       <th></th>
     </tr>
@@ -72,10 +71,6 @@
     <div class="form-group">
       <label>Target</label>
       <input type="text" id="target" placeholder="localhost:3030">
-    </div>
-    <div class="form-group">
-      <label>Local Port</label>
-      <input type="number" id="local_port" placeholder="optional">
     </div>
     <button class="btn-add" onclick="addRoute()">Add</button>
   </div>
@@ -106,14 +101,13 @@ async function load() {
     const routes = await res.json();
     const tbody = document.getElementById('routes');
     if (routes.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty">No routes configured</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">No routes configured</td></tr>';
       return;
     }
     tbody.innerHTML = routes.map(r => `<tr>
       <td><strong>${esc(r.name)}</strong></td>
       <td><span class="type ${r.type}">${r.type}</span></td>
       <td>${esc(r.target)}</td>
-      <td>${r.local_port || '-'}</td>
       <td>${tcpPorts[r.name] || '-'}</td>
       <td><button class="btn-remove" onclick="removeRoute('${esc(r.name)}')">Remove</button></td>
     </tr>`).join('');
@@ -127,7 +121,6 @@ async function addRoute() {
     name: document.getElementById('name').value,
     type: document.getElementById('type').value,
     target: document.getElementById('target').value,
-    local_port: parseInt(document.getElementById('local_port').value) || 0,
   };
   if (!body.name || !body.target) { errEl.textContent = 'Name and target are required'; return; }
   try {
@@ -135,7 +128,6 @@ async function addRoute() {
     if (!res.ok) { errEl.textContent = await res.text(); return; }
     document.getElementById('name').value = '';
     document.getElementById('target').value = '';
-    document.getElementById('local_port').value = '';
     load();
   } catch(e) { errEl.textContent = e.message; }
 }
