@@ -62,9 +62,9 @@ func initCmd() *cobra.Command {
 					cfgPath = config.DefaultServerConfigPath()
 				}
 				cfg := &config.ServerConfig{
-					ListenHTTP: ":80",
-					ListenTCP:  ":15432",
-					Token:      token,
+					ListenHTTP:   ":80",
+					TCPPortRange: "15000-15100",
+					Token:        token,
 				}
 				if err := config.SaveServerConfig(cfgPath, cfg); err != nil {
 					return err

@@ -1,90 +1,90 @@
 package server
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
+	"context"
+	"fmt"
 	"log"
-	"math/big"
 	"net"
-	"strings"
-	"time"
+
+	"github.com/iluxav/ntunl/internal/tunnel"
 )
 
-func (s *Server) startTCPListener() {
-	cert, err := generateSelfSignedCert()
-	if err != nil {
-		log.Printf("failed to generate TLS cert for TCP proxy: %v", err)
-		return
+// syncTCPListeners starts listeners for new TCP routes and stops listeners for removed routes.
+func (s *Server) syncTCPListeners(routes []tunnel.RouteInfo) {
+	tcpRoutes := map[string]bool{}
+	for _, r := range routes {
+		if r.Type == "tcp" {
+			tcpRoutes[r.Name] = true
+		}
 	}
 
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Stop listeners for removed routes
+	for name, tl := range s.tcpListeners {
+		if !tcpRoutes[name] {
+			log.Printf("stopping TCP listener for %s on port %d", name, tl.port)
+			tl.cancel()
+			tl.listener.Close()
+			delete(s.tcpListeners, name)
+		}
 	}
 
-	ln, err := tls.Listen("tcp", s.cfg.ListenTCP, tlsConfig)
-	if err != nil {
-		log.Printf("TCP listener failed: %v", err)
-		return
-	}
-	defer ln.Close()
-
-	log.Printf("TCP/SNI listener on %s", s.cfg.ListenTCP)
-
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			log.Printf("TCP accept error: %v", err)
+	// Start listeners for new routes
+	for name := range tcpRoutes {
+		if _, exists := s.tcpListeners[name]; exists {
 			continue
 		}
-		go s.handleTCPConn(conn)
+		port, err := s.allocatePort(name)
+		if err != nil {
+			log.Printf("failed to allocate port for %s: %v", name, err)
+			continue
+		}
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			log.Printf("failed to start TCP listener for %s on port %d: %v", name, port, err)
+			continue
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		s.tcpListeners[name] = &tcpListener{
+			port:     port,
+			listener: ln,
+			cancel:   cancel,
+		}
+		log.Printf("TCP listener for route %q on port %d", name, port)
+		go s.serveTCP(ctx, ln, name)
 	}
 }
 
-func (s *Server) handleTCPConn(c net.Conn) {
+func (s *Server) serveTCP(ctx context.Context, ln net.Listener, routeName string) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				log.Printf("TCP accept error for %s: %v", routeName, err)
+				continue
+			}
+		}
+		go s.handlePlainTCPConn(conn, routeName)
+	}
+}
+
+func (s *Server) handlePlainTCPConn(c net.Conn, routeName string) {
 	defer c.Close()
-
-	tlsConn, ok := c.(*tls.Conn)
-	if !ok {
-		log.Printf("non-TLS connection on TCP listener")
-		return
-	}
-
-	if err := tlsConn.Handshake(); err != nil {
-		log.Printf("TLS handshake failed: %v", err)
-		return
-	}
-
-	sni := tlsConn.ConnectionState().ServerName
-	subdomain := extractSubdomainFromSNI(sni)
-	if subdomain == "" {
-		log.Printf("no SNI subdomain in TCP connection")
-		return
-	}
-
-	route := s.findRoute(subdomain)
-	if route == nil {
-		log.Printf("TCP route not found: %s", subdomain)
-		return
-	}
-	if route.Type != "tcp" {
-		log.Printf("route %s is not TCP type", subdomain)
-		return
-	}
 
 	tunnelConn := s.getConn()
 	if tunnelConn == nil {
-		log.Printf("no tunnel connection for TCP route %s", subdomain)
+		log.Printf("no tunnel connection for TCP route %s", routeName)
 		return
 	}
 
-	stream, err := tunnelConn.Mux().OpenStream(subdomain)
+	stream, err := tunnelConn.Mux().OpenStream(routeName)
 	if err != nil {
-		log.Printf("failed to open stream for TCP route %s: %v", subdomain, err)
+		log.Printf("failed to open stream for TCP route %s: %v", routeName, err)
 		return
 	}
 	defer tunnelConn.Mux().CloseStream(stream.ID)
@@ -124,45 +124,4 @@ func (s *Server) handleTCPConn(c net.Conn) {
 			return
 		}
 	}
-}
-
-func generateSelfSignedCert() (tls.Certificate, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{Organization: []string{"etunl"}},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     []string{"*.etunl.com", "etunl.com"},
-	}
-
-	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	keyDER, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-
-	return tls.X509KeyPair(certPEM, keyPEM)
-}
-
-func extractSubdomainFromSNI(sni string) string {
-	parts := strings.SplitN(sni, ".", 2)
-	if len(parts) < 2 {
-		return ""
-	}
-	return parts[0]
 }

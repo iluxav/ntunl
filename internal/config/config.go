@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,9 +24,9 @@ type ClientConfig struct {
 }
 
 type ServerConfig struct {
-	ListenHTTP string `yaml:"listen_http"`
-	ListenTCP  string `yaml:"listen_tcp"`
-	Token      string `yaml:"token"`
+	ListenHTTP   string `yaml:"listen_http"`
+	TCPPortRange string `yaml:"tcp_port_range"`
+	Token        string `yaml:"token"`
 }
 
 func DefaultConfigPath() string {
@@ -61,8 +63,8 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if cfg.ListenHTTP == "" {
 		cfg.ListenHTTP = ":80"
 	}
-	if cfg.ListenTCP == "" {
-		cfg.ListenTCP = ":15432"
+	if cfg.TCPPortRange == "" {
+		cfg.TCPPortRange = "15000-15100"
 	}
 	return &cfg, nil
 }
@@ -89,6 +91,28 @@ func SaveClientConfig(path string, cfg *ClientConfig) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 	return os.WriteFile(path, data, 0600)
+}
+
+func (c *ServerConfig) ParseTCPPortRange() (int, int, error) {
+	parts := strings.SplitN(c.TCPPortRange, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid tcp_port_range format %q, expected 'start-end'", c.TCPPortRange)
+	}
+	start, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid range start: %w", err)
+	}
+	end, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid range end: %w", err)
+	}
+	if start >= end {
+		return 0, 0, fmt.Errorf("range start must be less than end")
+	}
+	if start < 1 || end > 65535 {
+		return 0, 0, fmt.Errorf("port range must be within 1-65535")
+	}
+	return start, end, nil
 }
 
 func (c *ClientConfig) FindRoute(name string) *Route {

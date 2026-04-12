@@ -1,43 +1,92 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"hash/fnv"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 
+	"github.com/gorilla/websocket"
 	"github.com/iluxav/ntunl/internal/config"
 	"github.com/iluxav/ntunl/internal/tunnel"
-	"github.com/gorilla/websocket"
 )
+
+type tcpListener struct {
+	port     int
+	listener net.Listener
+	cancel   context.CancelFunc
+}
 
 type Server struct {
 	cfg      *config.ServerConfig
 	upgrader websocket.Upgrader
 
-	mu     sync.RWMutex
-	conn   *tunnel.Conn   // single client connection
-	routes []tunnel.RouteInfo
+	mu           sync.RWMutex
+	conn         *tunnel.Conn // single client connection
+	routes       []tunnel.RouteInfo
+	tcpListeners map[string]*tcpListener // route name → listener
+	portStart    int
+	portEnd      int
 }
 
 func New(cfg *config.ServerConfig) *Server {
+	portStart, portEnd, err := cfg.ParseTCPPortRange()
+	if err != nil {
+		log.Printf("WARNING: invalid tcp_port_range: %v, TCP tunneling disabled", err)
+		portStart, portEnd = 0, 0
+	}
 	return &Server{
 		cfg: cfg,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
+		tcpListeners: make(map[string]*tcpListener),
+		portStart:    portStart,
+		portEnd:      portEnd,
 	}
 }
 
 func (s *Server) Start() error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/tunnel", s.handleTunnel)
-
-	log.Printf("server listening on %s (HTTP) and %s (TCP)", s.cfg.ListenHTTP, s.cfg.ListenTCP)
-
-	go s.startTCPListener()
+	log.Printf("server listening on %s (HTTP), TCP port range %d-%d", s.cfg.ListenHTTP, s.portStart, s.portEnd)
 
 	return http.ListenAndServe(s.cfg.ListenHTTP, s)
+}
+
+// allocatePort returns a deterministic port for the given route name.
+// Caller must hold s.mu.
+func (s *Server) allocatePort(routeName string) (int, error) {
+	if s.portStart == 0 && s.portEnd == 0 {
+		return 0, fmt.Errorf("TCP port range not configured")
+	}
+	rangeSize := s.portEnd - s.portStart
+	h := fnv.New32a()
+	h.Write([]byte(routeName))
+	port := s.portStart + int(h.Sum32())%rangeSize
+
+	// Check if already in use by another route
+	for name, tl := range s.tcpListeners {
+		if tl.port == port && name != routeName {
+			// Linear scan for next free port
+			for p := s.portStart; p < s.portEnd; p++ {
+				taken := false
+				for _, tl2 := range s.tcpListeners {
+					if tl2.port == p {
+						taken = true
+						break
+					}
+				}
+				if !taken {
+					return p, nil
+				}
+			}
+			return 0, fmt.Errorf("no free TCP ports in range %d-%d", s.portStart, s.portEnd)
+		}
+	}
+	return port, nil
 }
 
 // ServeHTTP handles all incoming HTTP requests.
@@ -60,14 +109,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	routeCount := len(s.routes)
 	routes := make([]tunnel.RouteInfo, len(s.routes))
 	copy(routes, s.routes)
+	tcpPorts := make(map[string]int)
+	for name, tl := range s.tcpListeners {
+		tcpPorts[name] = tl.port
+	}
 	s.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"status":          "ok",
+		"status":           "ok",
 		"tunnel_connected": connected,
 		"routes":           routeCount,
 		"route_list":       routes,
+		"tcp_ports":        tcpPorts,
 	})
 }
 
@@ -112,6 +166,7 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		for _, r := range routes {
 			log.Printf("  - %s (%s)", r.Name, r.Type)
 		}
+		s.syncTCPListeners(routes)
 	})
 
 	err = conn.ReadLoop()
@@ -123,6 +178,7 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		s.routes = nil
 	}
 	s.mu.Unlock()
+	s.syncTCPListeners(nil) // stop all TCP listeners
 }
 
 func (s *Server) getConn() *tunnel.Conn {
