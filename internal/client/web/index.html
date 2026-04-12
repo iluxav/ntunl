@@ -48,6 +48,7 @@
       <th>Type</th>
       <th>Target</th>
       <th>Local Port</th>
+      <th>Server Port</th>
       <th></th>
     </tr>
   </thead>
@@ -93,12 +94,19 @@ async function load() {
     document.getElementById('status').innerHTML = '<span class="dot disconnected"></span>Unable to reach client';
   }
 
+  let tcpPorts = {};
+  try {
+    const healthRes = await fetch('/health');
+    const healthData = await healthRes.json();
+    tcpPorts = healthData.tcp_ports || {};
+  } catch(e) {}
+
   try {
     const res = await fetch('/api/routes');
     const routes = await res.json();
     const tbody = document.getElementById('routes');
     if (routes.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty">No routes configured</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">No routes configured</td></tr>';
       return;
     }
     tbody.innerHTML = routes.map(r => `<tr>
@@ -106,6 +114,7 @@ async function load() {
       <td><span class="type ${r.type}">${r.type}</span></td>
       <td>${esc(r.target)}</td>
       <td>${r.local_port || '-'}</td>
+      <td>${tcpPorts[r.name] || '-'}</td>
       <td><button class="btn-remove" onclick="removeRoute('${esc(r.name)}')">Remove</button></td>
     </tr>`).join('');
   } catch(e) {}
