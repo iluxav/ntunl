@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/iluxav/ntunl/internal/config"
@@ -40,11 +41,16 @@ func (c *Client) startDashboard(addr string) {
 	mux.HandleFunc("/api/status", c.basicAuth(func(w http.ResponseWriter, r *http.Request) {
 		cfg := c.watcher.Config()
 		connected := c.conn != nil
+		machineName := cfg.MachineName
+		if machineName == "" {
+			machineName, _ = os.Hostname()
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"tunnel_connected": connected,
 			"routes":           len(cfg.Routes),
 			"server":           cfg.Server,
+			"machine_name":     machineName,
 		})
 	}))
 

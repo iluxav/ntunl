@@ -18,9 +18,10 @@ type Route struct {
 }
 
 type ClientConfig struct {
-	Server string  `yaml:"server"`
-	Token  string  `yaml:"token"`
-	Routes []Route `yaml:"routes"`
+	Server      string  `yaml:"server"`
+	Token       string  `yaml:"token"`
+	MachineName string  `yaml:"machine_name"`
+	Routes      []Route `yaml:"routes"`
 }
 
 type ServerConfig struct {

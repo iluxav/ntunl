@@ -21,13 +21,18 @@ type tcpListener struct {
 	cancel   context.CancelFunc
 }
 
+type clientEntry struct {
+	machineName string
+	conn        *tunnel.Conn
+	routes      []tunnel.RouteInfo
+}
+
 type Server struct {
 	cfg      *config.ServerConfig
 	upgrader websocket.Upgrader
 
 	mu           sync.RWMutex
-	conn         *tunnel.Conn // single client connection
-	routes       []tunnel.RouteInfo
+	clients      map[string]*clientEntry
 	tcpListeners map[string]*tcpListener // route name → listener
 	portStart    int
 	portEnd      int
@@ -44,6 +49,7 @@ func New(cfg *config.ServerConfig) *Server {
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
+		clients:      make(map[string]*clientEntry),
 		tcpListeners: make(map[string]*tcpListener),
 		portStart:    portStart,
 		portEnd:      portEnd,
@@ -52,7 +58,6 @@ func New(cfg *config.ServerConfig) *Server {
 
 func (s *Server) Start() error {
 	log.Printf("server listening on %s (HTTP), TCP port range %d-%d", s.cfg.ListenHTTP, s.portStart, s.portEnd)
-
 	return http.ListenAndServe(s.cfg.ListenHTTP, s)
 }
 
@@ -105,11 +110,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
-	connected := s.conn != nil
-	routeCount := len(s.routes)
-	routes := make([]tunnel.RouteInfo, len(s.routes))
-	copy(routes, s.routes)
-	tcpPorts := make(map[string]int)
+	machines := make([]map[string]any, 0, len(s.clients))
+	totalRoutes := 0
+	for _, e := range s.clients {
+		routes := make([]tunnel.RouteInfo, len(e.routes))
+		copy(routes, e.routes)
+		totalRoutes += len(routes)
+		machines = append(machines, map[string]any{
+			"machine_name": e.machineName,
+			"routes":       routes,
+		})
+	}
+	tcpPorts := make(map[string]int, len(s.tcpListeners))
 	for name, tl := range s.tcpListeners {
 		tcpPorts[name] = tl.port
 	}
@@ -117,11 +129,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"status":           "ok",
-		"tunnel_connected": connected,
-		"routes":           routeCount,
-		"route_list":       routes,
-		"tcp_ports":        tcpPorts,
+		"status":    "ok",
+		"machines":  machines,
+		"routes":    totalRoutes,
+		"tcp_ports": tcpPorts,
 	})
 }
 
@@ -133,67 +144,99 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	machineName := r.Header.Get("X-Machine-Name")
+
 	ws, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
 		return
 	}
 
-	// Close previous connection if any
+	if machineName == "" {
+		// anonymous connection (e.g. etunl connect): serve but don't register.
+		log.Printf("anonymous tunnel connection from %s", r.RemoteAddr)
+		conn := tunnel.NewConn(ws, nil)
+		conn.StartPing()
+		err := conn.ReadLoop()
+		log.Printf("anonymous tunnel disconnected: %v", err)
+		return
+	}
+
 	s.mu.Lock()
-	if s.conn != nil {
-		s.conn.Close()
+	if old, ok := s.clients[machineName]; ok {
+		log.Printf("machine %q reconnecting; closing previous connection", machineName)
+		old.conn.Close()
 	}
 	conn := tunnel.NewConn(ws, nil)
-	s.conn = conn
+	entry := &clientEntry{machineName: machineName, conn: conn}
+	s.clients[machineName] = entry
 	s.mu.Unlock()
 
-	log.Printf("tunnel client connected from %s", r.RemoteAddr)
+	log.Printf("tunnel client %q connected from %s", machineName, r.RemoteAddr)
 	conn.StartPing()
 
-	// Override the RouteSync handler
-	originalMux := conn.Mux()
-	originalMux.SetRouteSyncHandler(func(payload []byte) {
+	conn.Mux().SetRouteSyncHandler(func(payload []byte) {
 		var routes []tunnel.RouteInfo
 		if err := json.Unmarshal(payload, &routes); err != nil {
-			log.Printf("invalid route sync: %v", err)
+			log.Printf("invalid route sync from %q: %v", machineName, err)
 			return
 		}
+
 		s.mu.Lock()
-		s.routes = routes
+		accepted := make([]tunnel.RouteInfo, 0, len(routes))
+		for _, rt := range routes {
+			if owner := s.findOwnerLocked(rt.Name); owner != "" && owner != machineName {
+				log.Printf("route %q from %q rejected: already owned by %q", rt.Name, machineName, owner)
+				continue
+			}
+			accepted = append(accepted, rt)
+		}
+		entry.routes = accepted
 		s.mu.Unlock()
-		log.Printf("routes updated: %d routes", len(routes))
-		for _, r := range routes {
+
+		log.Printf("routes updated for %q: %d accepted / %d sent", machineName, len(accepted), len(routes))
+		for _, r := range accepted {
 			log.Printf("  - %s (%s)", r.Name, r.Type)
 		}
-		s.syncTCPListeners(routes)
+		s.syncTCPListeners()
 	})
 
 	err = conn.ReadLoop()
-	log.Printf("tunnel client disconnected: %v", err)
+	log.Printf("tunnel client %q disconnected: %v", machineName, err)
 
 	s.mu.Lock()
-	if s.conn == conn {
-		s.conn = nil
-		s.routes = nil
+	if s.clients[machineName] == entry {
+		delete(s.clients, machineName)
 	}
 	s.mu.Unlock()
-	s.syncTCPListeners(nil) // stop all TCP listeners
+	s.syncTCPListeners()
 }
 
-func (s *Server) getConn() *tunnel.Conn {
+// findRoute locates a route by subdomain across all connected machines
+// and returns the route info along with the owning machine's tunnel conn.
+func (s *Server) findRoute(name string) (*tunnel.RouteInfo, *tunnel.Conn) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.conn
-}
-
-func (s *Server) findRoute(name string) *tunnel.RouteInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for i := range s.routes {
-		if s.routes[i].Name == name {
-			return &s.routes[i]
+	for _, entry := range s.clients {
+		for i := range entry.routes {
+			if entry.routes[i].Name == name {
+				rt := entry.routes[i]
+				return &rt, entry.conn
+			}
 		}
 	}
-	return nil
+	return nil, nil
+}
+
+// findOwnerLocked returns the machine name that owns a given route, or "".
+// Caller must hold s.mu.
+func (s *Server) findOwnerLocked(routeName string) string {
+	for name, entry := range s.clients {
+		for _, r := range entry.routes {
+			if r.Name == routeName {
+				return name
+			}
+		}
+	}
+	return ""
 }

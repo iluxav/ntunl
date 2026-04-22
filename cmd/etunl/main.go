@@ -77,9 +77,14 @@ func initCmd() *cobra.Command {
 				if serverAddr == "" {
 					serverAddr = "tunnel.yourdomain.com"
 				}
+				machineName, _ := os.Hostname()
+				if machineName == "" {
+					machineName = "client"
+				}
 				cfg := &config.ClientConfig{
-					Server: serverAddr,
-					Token:  token,
+					Server:      serverAddr,
+					Token:       token,
+					MachineName: machineName,
 					Routes: []config.Route{
 						{
 							Name:   "admin",

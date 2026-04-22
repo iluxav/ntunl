@@ -3,6 +3,7 @@
 
 server: tunnel.etunl.com
 token: "change-me"
+machine_name: homelab1
 
 routes:
   - name: app

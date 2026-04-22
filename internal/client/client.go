@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/iluxav/ntunl/internal/config"
@@ -70,11 +71,20 @@ func (c *Client) connectLoop(cfg *config.ClientConfig) {
 }
 
 func (c *Client) connect(cfg *config.ClientConfig) error {
+	machineName := cfg.MachineName
+	if machineName == "" {
+		machineName, _ = os.Hostname()
+	}
+	if machineName == "" {
+		return fmt.Errorf("machine_name is empty and hostname is unavailable; set machine_name in config")
+	}
+
 	url := fmt.Sprintf("ws://%s/tunnel", cfg.Server)
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+cfg.Token)
+	header.Set("X-Machine-Name", machineName)
 
-	log.Printf("connecting to %s", url)
+	log.Printf("connecting to %s as %q", url, machineName)
 
 	ws, _, err := websocket.DefaultDialer.Dial(url, header)
 	if err != nil {

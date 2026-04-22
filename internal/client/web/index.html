@@ -8,6 +8,8 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 2rem; max-width: 800px; margin: 0 auto; }
   h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #fff; }
+  .machine { font-size: 0.85rem; color: #aaa; margin-bottom: 0.25rem; }
+  .machine .tag { display: inline-block; background: #1a1a1a; border: 1px solid #333; padding: 1px 8px; border-radius: 4px; color: #e0e0e0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
   .status { font-size: 0.85rem; color: #888; margin-bottom: 2rem; }
   .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
   .dot.connected { background: #22c55e; }
@@ -39,6 +41,7 @@
 <body>
 
 <h1>etunl</h1>
+<div class="machine" id="machine"></div>
 <div class="status" id="status"></div>
 
 <table>
@@ -84,8 +87,10 @@ async function load() {
     const data = await res.json();
     const dot = data.tunnel_connected ? 'connected' : 'disconnected';
     const label = data.tunnel_connected ? 'Tunnel connected' : 'Tunnel disconnected';
+    document.getElementById('machine').innerHTML = data.machine_name ? `Machine: <span class="tag">${esc(data.machine_name)}</span>` : '';
     document.getElementById('status').innerHTML = `<span class="dot ${dot}"></span>${label} &middot; ${data.routes} route${data.routes !== 1 ? 's' : ''}`;
   } catch(e) {
+    document.getElementById('machine').innerHTML = '';
     document.getElementById('status').innerHTML = '<span class="dot disconnected"></span>Unable to reach client';
   }
 

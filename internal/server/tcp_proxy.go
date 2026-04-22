@@ -5,21 +5,22 @@ import (
 	"fmt"
 	"log"
 	"net"
-
-	"github.com/iluxav/ntunl/internal/tunnel"
 )
 
-// syncTCPListeners starts listeners for new TCP routes and stops listeners for removed routes.
-func (s *Server) syncTCPListeners(routes []tunnel.RouteInfo) {
-	tcpRoutes := map[string]bool{}
-	for _, r := range routes {
-		if r.Type == "tcp" {
-			tcpRoutes[r.Name] = true
-		}
-	}
-
+// syncTCPListeners starts listeners for TCP routes claimed by any connected
+// client, and stops listeners for routes that no client owns anymore.
+func (s *Server) syncTCPListeners() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	tcpRoutes := map[string]bool{}
+	for _, entry := range s.clients {
+		for _, r := range entry.routes {
+			if r.Type == "tcp" {
+				tcpRoutes[r.Name] = true
+			}
+		}
+	}
 
 	// Stop listeners for removed routes
 	for name, tl := range s.tcpListeners {
@@ -76,8 +77,8 @@ func (s *Server) serveTCP(ctx context.Context, ln net.Listener, routeName string
 func (s *Server) handlePlainTCPConn(c net.Conn, routeName string) {
 	defer c.Close()
 
-	tunnelConn := s.getConn()
-	if tunnelConn == nil {
+	route, tunnelConn := s.findRoute(routeName)
+	if route == nil || tunnelConn == nil {
 		log.Printf("no tunnel connection for TCP route %s", routeName)
 		return
 	}

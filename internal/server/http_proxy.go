@@ -14,7 +14,7 @@ func (s *Server) handleHTTPProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	route := s.findRoute(subdomain)
+	route, conn := s.findRoute(subdomain)
 	if route == nil {
 		http.Error(w, "route not found: "+subdomain, http.StatusNotFound)
 		return
@@ -23,8 +23,6 @@ func (s *Server) handleHTTPProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "route is not HTTP: "+subdomain, http.StatusBadRequest)
 		return
 	}
-
-	conn := s.getConn()
 	if conn == nil {
 		http.Error(w, "tunnel not connected", http.StatusBadGateway)
 		return
