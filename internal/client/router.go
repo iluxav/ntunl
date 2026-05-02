@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/iluxav/ntunl/internal/config"
 	"github.com/iluxav/ntunl/internal/tunnel"
@@ -34,14 +35,75 @@ func (c *Client) handleHTTPStream(s *tunnel.Stream, route *config.Route) {
 		}
 	}()
 
-	// Parse the HTTP request from the pipe
-	req, err := http.ReadRequest(bufio.NewReader(pr))
+	br := bufio.NewReader(pr)
+	req, err := http.ReadRequest(br)
 	if err != nil {
 		log.Printf("failed to read HTTP request from stream: %v", err)
 		return
 	}
 
+	if isWebSocketUpgrade(req) {
+		c.forwardWebSocket(s, req, route, pr, br)
+		return
+	}
+
 	c.forwardHTTP(s, req, route)
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return false
+	}
+	for _, v := range r.Header.Values("Connection") {
+		for _, t := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(t), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *Client) forwardWebSocket(s *tunnel.Stream, req *http.Request, route *config.Route, pr *io.PipeReader, br *bufio.Reader) {
+	targetConn, err := net.Dial("tcp", route.Target)
+	if err != nil {
+		log.Printf("ws: failed to dial %s for %s: %v", route.Target, route.Name, err)
+		return
+	}
+	defer targetConn.Close()
+
+	if err := req.Write(targetConn); err != nil {
+		log.Printf("ws: write request to %s: %v", route.Target, err)
+		return
+	}
+
+	done := make(chan struct{})
+
+	// target → tunnel
+	go func() {
+		defer close(done)
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := targetConn.Read(buf)
+			if n > 0 {
+				if sendErr := c.conn.Mux().SendData(s.ID, buf[:n]); sendErr != nil {
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// When the target side ends, unblock the copy below by closing the pipe.
+	go func() {
+		<-done
+		pr.Close()
+	}()
+
+	// tunnel (via br to keep any post-headers bytes already buffered) → target
+	io.Copy(targetConn, br)
 }
 
 func (c *Client) forwardHTTP(s *tunnel.Stream, req *http.Request, route *config.Route) {
