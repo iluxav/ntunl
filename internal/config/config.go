@@ -1,7 +1,11 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,6 +13,16 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// GenerateToken returns a fresh 32-byte hex-encoded token suitable for
+// either the tunnel auth token or other secret values.
+func GenerateToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate token: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
 
 type Route struct {
 	Name      string `yaml:"name" json:"name"`
@@ -25,9 +39,12 @@ type ClientConfig struct {
 }
 
 type ServerConfig struct {
-	ListenHTTP   string `yaml:"listen_http"`
-	TCPPortRange string `yaml:"tcp_port_range"`
-	Token        string `yaml:"token"`
+	ListenHTTP     string `yaml:"listen_http"`
+	TCPPortRange   string `yaml:"tcp_port_range"`
+	Token          string `yaml:"token"`
+	AdminSubdomain string `yaml:"admin_subdomain,omitempty"`
+	AdminUser      string `yaml:"admin_user,omitempty"`
+	AdminPassword  string `yaml:"admin_password,omitempty"`
 }
 
 func DefaultConfigPath() string {
@@ -54,6 +71,22 @@ func LoadClientConfig(path string) (*ClientConfig, error) {
 
 func LoadServerConfig(path string) (*ServerConfig, error) {
 	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		token, terr := GenerateToken()
+		if terr != nil {
+			return nil, terr
+		}
+		cfg := &ServerConfig{
+			ListenHTTP:     ":80",
+			TCPPortRange:   "15000-15100",
+			AdminSubdomain: "manage",
+			Token:          token,
+		}
+		if err := SaveServerConfig(path, cfg); err != nil {
+			return nil, fmt.Errorf("create default server config: %w", err)
+		}
+		return cfg, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
@@ -66,6 +99,19 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if cfg.TCPPortRange == "" {
 		cfg.TCPPortRange = "15000-15100"
+	}
+	if cfg.AdminSubdomain == "" {
+		cfg.AdminSubdomain = "manage"
+	}
+	if cfg.Token == "" {
+		token, terr := GenerateToken()
+		if terr != nil {
+			return nil, terr
+		}
+		cfg.Token = token
+		if err := SaveServerConfig(path, &cfg); err != nil {
+			return nil, fmt.Errorf("persist generated token: %w", err)
+		}
 	}
 	return &cfg, nil
 }

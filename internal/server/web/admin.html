@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>etunl admin</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 2rem; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; color: #fff; }
+  h2 { font-size: 1rem; color: #ccc; font-weight: 500; }
+  .subtitle { font-size: 0.85rem; color: #888; margin-bottom: 2rem; }
+
+  .section { background: #0f0f0f; border: 1px solid #1f1f1f; border-radius: 8px; padding: 1.2rem; margin-bottom: 1.5rem; }
+  .section-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1rem; }
+  .section-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+  .token-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0a0a0a; border: 1px solid #2a2a2a; padding: 0.55rem 0.75rem; border-radius: 4px; font-size: 0.85rem; color: #e0e0e0; user-select: all; word-break: break-all; }
+  .token-value.masked { color: #555; letter-spacing: 0.15em; }
+
+  .btn { background: #1a1a1a; border: 1px solid #333; color: #ccc; padding: 0.45rem 0.85rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; white-space: nowrap; font-family: inherit; }
+  .btn:hover { border-color: #555; }
+  .btn-danger { background: #3b1f1f; border: 1px solid #5b2a2a; color: #f87171; }
+  .btn-danger:hover { background: #4d2828; }
+
+  .machine-card { background: #0a0a0a; border: 1px solid #1f1f1f; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+  .machine-card:last-child { margin-bottom: 0; }
+  .machine-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-bottom: 0.85rem; font-size: 0.85rem; color: #aaa; }
+  .machine-name { display: inline-block; background: #1a1a1a; border: 1px solid #333; padding: 1px 8px; border-radius: 4px; color: #e0e0e0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+  .machine-meta { color: #777; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid #222; color: #777; font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  td { padding: 0.5rem 0.7rem; border-bottom: 1px solid #181818; font-size: 0.88rem; }
+  tr:last-child td { border-bottom: none; }
+
+  .type { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; }
+  .type.http { background: #1e3a5f; color: #60a5fa; }
+  .type.tcp { background: #3b1f1f; color: #f87171; }
+
+  .endpoint a { color: #60a5fa; text-decoration: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .endpoint a:hover { text-decoration: underline; }
+  .endpoint .tcp-addr { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .muted { color: #555; }
+
+  .empty { color: #555; text-align: center; padding: 2rem; }
+
+  .toast { position: fixed; bottom: 1.5rem; right: 1.5rem; padding: 0.6rem 1rem; border-radius: 6px; font-size: 0.85rem; opacity: 0; transition: opacity 0.2s; pointer-events: none; max-width: 360px; }
+  .toast.show { opacity: 1; }
+
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 100; padding: 1rem; }
+  .modal-backdrop.show { display: flex; }
+  .modal { background: #0f0f0f; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1.5rem; max-width: 520px; width: 100%; }
+  .modal h3 { font-size: 1.1rem; margin-bottom: 0.75rem; color: #fff; }
+  .modal p { font-size: 0.9rem; line-height: 1.55; color: #bbb; margin-bottom: 1rem; }
+  .modal .warning { background: #2a1a1a; border-left: 3px solid #ef4444; padding: 0.75rem; margin-bottom: 1rem; font-size: 0.85rem; color: #fca5a5; border-radius: 0 4px 4px 0; line-height: 1.5; }
+  .modal .warning code { background: #1a0f0f; padding: 1px 6px; border-radius: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+  .modal-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }
+
+  .setup { max-width: 440px; margin: 4rem auto 0; }
+  .setup .section { padding: 1.6rem; }
+  .setup h2 { font-size: 1.2rem; color: #fff; margin-bottom: 0.5rem; }
+  .setup p { font-size: 0.88rem; line-height: 1.55; color: #aaa; margin-bottom: 1.2rem; }
+  .setup .field { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.85rem; }
+  .setup label { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em; }
+  .setup input { background: #0a0a0a; border: 1px solid #333; color: #e0e0e0; padding: 0.55rem 0.7rem; border-radius: 4px; font-size: 0.9rem; font-family: inherit; }
+  .setup input:focus { outline: none; border-color: #555; }
+  .setup .submit { background: #1e3a5f; border: none; color: #60a5fa; padding: 0.6rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: 500; width: 100%; margin-top: 0.4rem; font-family: inherit; }
+  .setup .submit:hover { background: #254b75; }
+  .setup .err { color: #f87171; font-size: 0.85rem; margin-top: 0.4rem; min-height: 1.2em; }
+  .setup .ok { color: #4ade80; font-size: 0.85rem; margin-top: 0.4rem; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="setup hidden" id="setup-view">
+  <div class="section">
+    <h2>Welcome to etunl</h2>
+    <p>This server has no admin credentials yet. Create a username and password to lock down this dashboard. They'll be saved to <code>~/.etunl/server.yaml</code>.</p>
+    <form onsubmit="submitSetup(event)">
+      <div class="field">
+        <label for="setup-user">Username</label>
+        <input type="text" id="setup-user" autocomplete="off" required>
+      </div>
+      <div class="field">
+        <label for="setup-pass">Password</label>
+        <input type="password" id="setup-pass" autocomplete="new-password" minlength="8" required>
+      </div>
+      <div class="field">
+        <label for="setup-pass2">Confirm password</label>
+        <input type="password" id="setup-pass2" autocomplete="new-password" minlength="8" required>
+      </div>
+      <button type="submit" class="submit">Create admin account</button>
+      <div class="err" id="setup-err"></div>
+    </form>
+  </div>
+</div>
+
+<div id="dashboard-view" class="hidden">
+
+<h1>etunl admin</h1>
+<div class="subtitle" id="subtitle">Loading…</div>
+
+<div class="section">
+  <div class="section-header">
+    <h2>Tunnel token</h2>
+    <div class="section-actions">
+      <button class="btn" id="reveal" onclick="toggleReveal()">Reveal</button>
+      <button class="btn" onclick="copyToken()">Copy</button>
+      <button class="btn btn-danger" onclick="confirmRotate()">Rotate</button>
+    </div>
+  </div>
+  <div class="token-value masked" id="token">—</div>
+</div>
+
+<div class="section">
+  <div class="section-header"><h2>Connected machines</h2></div>
+  <div id="machines"></div>
+</div>
+
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <h3>Rotate tunnel token?</h3>
+    <div class="warning">
+      <strong>Break-glass action.</strong> Existing tunnel connections stay alive, but on the next reconnect every client will fail until its <code>config.yaml</code> is updated with the new token. You will need access to each client machine to update them.
+    </div>
+    <p>Type <strong>rotate</strong> below to confirm.</p>
+    <input type="text" id="confirm-input" placeholder="rotate" style="width: 100%; background: #0a0a0a; border: 1px solid #333; color: #e0e0e0; padding: 0.5rem 0.7rem; border-radius: 4px; font-size: 0.9rem; margin-bottom: 1rem; font-family: inherit;">
+    <div class="modal-actions">
+      <button class="btn" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-danger" onclick="rotateToken()">Yes, rotate</button>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let currentToken = '';
+let revealed = false;
+let pollTimer = null;
+
+function showSetup() {
+  document.getElementById('setup-view').classList.remove('hidden');
+  document.getElementById('dashboard-view').classList.add('hidden');
+  setTimeout(() => document.getElementById('setup-user').focus(), 50);
+}
+
+function showDashboard() {
+  document.getElementById('setup-view').classList.add('hidden');
+  document.getElementById('dashboard-view').classList.remove('hidden');
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/status');
+    if (res.status === 401) {
+      // Browser already prompted basic auth; nothing to render.
+      return;
+    }
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if (data.setup_required) {
+      showSetup();
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      return;
+    }
+    showDashboard();
+    currentToken = data.token || '';
+    renderToken();
+    const n = (data.machines || []).length;
+    const dom = data.public_domain || '—';
+    document.getElementById('subtitle').textContent = `${n} machine${n !== 1 ? 's' : ''} connected · public domain: ${dom}`;
+    renderMachines(data.machines || [], data.tcp_ports || {}, data.public_domain || '');
+    if (!pollTimer) pollTimer = setInterval(load, 5000);
+  } catch (e) {
+    showDashboard();
+    document.getElementById('subtitle').textContent = 'Unable to reach server: ' + (e.message || e);
+  }
+}
+
+async function submitSetup(ev) {
+  ev.preventDefault();
+  const errEl = document.getElementById('setup-err');
+  errEl.textContent = '';
+  const user = document.getElementById('setup-user').value.trim();
+  const pass = document.getElementById('setup-pass').value;
+  const pass2 = document.getElementById('setup-pass2').value;
+  if (pass.length < 8) { errEl.textContent = 'Password must be at least 8 characters'; return; }
+  if (pass !== pass2) { errEl.textContent = 'Passwords do not match'; return; }
+  try {
+    const res = await fetch('/api/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user, password: pass }),
+    });
+    if (!res.ok) { errEl.textContent = await res.text(); return; }
+    errEl.style.color = '#4ade80';
+    errEl.textContent = 'Account created. Reloading…';
+    setTimeout(() => window.location.reload(), 800);
+  } catch (e) {
+    errEl.textContent = e.message || String(e);
+  }
+}
+
+function renderToken() {
+  const el = document.getElementById('token');
+  if (!currentToken) {
+    el.textContent = '—';
+    el.classList.add('masked');
+    document.getElementById('reveal').textContent = 'Reveal';
+    return;
+  }
+  if (revealed) {
+    el.textContent = currentToken;
+    el.classList.remove('masked');
+    document.getElementById('reveal').textContent = 'Hide';
+  } else {
+    el.textContent = '•'.repeat(Math.min(48, currentToken.length));
+    el.classList.add('masked');
+    document.getElementById('reveal').textContent = 'Reveal';
+  }
+}
+
+function toggleReveal() {
+  revealed = !revealed;
+  renderToken();
+}
+
+async function copyToken() {
+  if (!currentToken) return;
+  try {
+    await navigator.clipboard.writeText(currentToken);
+    toast('Token copied to clipboard');
+  } catch (e) {
+    toast('Copy failed: ' + e.message, true);
+  }
+}
+
+function confirmRotate() {
+  document.getElementById('confirm-input').value = '';
+  document.getElementById('modal').classList.add('show');
+  setTimeout(() => document.getElementById('confirm-input').focus(), 50);
+}
+
+function hideModal() {
+  document.getElementById('modal').classList.remove('show');
+}
+
+async function rotateToken() {
+  const input = document.getElementById('confirm-input').value.trim().toLowerCase();
+  if (input !== 'rotate') {
+    toast('Type "rotate" to confirm', true);
+    return;
+  }
+  hideModal();
+  try {
+    const res = await fetch('/api/rotate-token', { method: 'POST' });
+    if (!res.ok) { toast('Rotate failed: ' + await res.text(), true); return; }
+    const data = await res.json();
+    currentToken = data.token;
+    revealed = true;
+    renderToken();
+    toast('Token rotated. Update each client config and restart.');
+  } catch (e) {
+    toast('Rotate failed: ' + e.message, true);
+  }
+}
+
+function renderMachines(machines, tcpPorts, publicDomain) {
+  const root = document.getElementById('machines');
+  if (machines.length === 0) {
+    root.innerHTML = '<div class="empty">No machines connected</div>';
+    return;
+  }
+  root.innerHTML = machines.map(m => {
+    const since = m.connected_at ? formatSince(m.connected_at) : '—';
+    const rows = (m.routes || []).map(r => {
+      const port = tcpPorts[r.name];
+      return `<tr>
+        <td><strong>${esc(r.name)}</strong></td>
+        <td><span class="type ${esc(r.type)}">${esc(r.type)}</span></td>
+        <td>${esc(r.target || '')}</td>
+        <td>${r.type === 'tcp' ? (port || '<span class="muted">pending</span>') : '<span class="muted">—</span>'}</td>
+        <td class="endpoint">${publicEndpoint(r, publicDomain, port)}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="machine-card">
+      <div class="machine-head">
+        <span class="machine-name">${esc(m.machine_name || 'unnamed')}</span>
+        <span class="machine-meta">from ${esc(m.remote_addr || '?')} · connected ${esc(since)}</span>
+      </div>
+      ${rows ? `<table><thead><tr><th>Subdomain</th><th>Type</th><th>Local Service</th><th>Public Port</th><th>Public Endpoint</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No routes</div>'}
+    </div>`;
+  }).join('');
+}
+
+function publicEndpoint(r, server, port) {
+  if (!server) return '<span class="muted">—</span>';
+  if (r.type === 'http') {
+    const url = `https://${r.name}.${server}`;
+    return `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>`;
+  }
+  if (r.type === 'tcp') {
+    if (!port) return '<span class="muted">—</span>';
+    return `<span class="tcp-addr">${esc(r.name)}.${esc(server)}:${port}</span>`;
+  }
+  return '<span class="muted">—</span>';
+}
+
+function formatSince(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+let toastTimer = null;
+function toast(msg, error) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  if (error) {
+    el.style.background = '#3a1a1a';
+    el.style.border = '1px solid #5a2a2a';
+    el.style.color = '#fca5a5';
+  } else {
+    el.style.background = '#1a3a2a';
+    el.style.border = '1px solid #2a5a3a';
+    el.style.color = '#4ade80';
+  }
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') hideModal();
+});
+
+load();
+</script>
+</body>
+</html>

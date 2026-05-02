@@ -123,7 +123,7 @@ func serverCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
-			srv := server.New(cfg)
+			srv := server.New(cfg, cfgPath)
 			return srv.Start()
 		},
 	}

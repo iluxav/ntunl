@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/iluxav/ntunl/internal/config"
@@ -25,10 +26,13 @@ type clientEntry struct {
 	machineName string
 	conn        *tunnel.Conn
 	routes      []tunnel.RouteInfo
+	remoteAddr  string
+	connectedAt time.Time
 }
 
 type Server struct {
 	cfg      *config.ServerConfig
+	cfgPath  string
 	upgrader websocket.Upgrader
 
 	mu           sync.RWMutex
@@ -38,14 +42,15 @@ type Server struct {
 	portEnd      int
 }
 
-func New(cfg *config.ServerConfig) *Server {
+func New(cfg *config.ServerConfig, cfgPath string) *Server {
 	portStart, portEnd, err := cfg.ParseTCPPortRange()
 	if err != nil {
 		log.Printf("WARNING: invalid tcp_port_range: %v, TCP tunneling disabled", err)
 		portStart, portEnd = 0, 0
 	}
 	return &Server{
-		cfg: cfg,
+		cfg:     cfg,
+		cfgPath: cfgPath,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -96,16 +101,24 @@ func (s *Server) allocatePort(routeName string) (int, error) {
 
 // ServeHTTP handles all incoming HTTP requests.
 // Requests to /tunnel are the tunnel WebSocket endpoint.
+// Requests with the admin subdomain go to the admin UI.
 // All other requests are proxied based on subdomain.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/tunnel":
 		s.handleTunnel(w, r)
+		return
 	case "/health":
 		s.handleHealth(w, r)
-	default:
-		s.handleHTTPProxy(w, r)
+		return
 	}
+
+	if sub := extractSubdomain(r.Host); sub != "" && sub == s.cfg.AdminSubdomain {
+		s.handleAdmin(w, r)
+		return
+	}
+
+	s.handleHTTPProxy(w, r)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -137,8 +150,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get("Authorization")
+	s.mu.RLock()
 	expected := "Bearer " + s.cfg.Token
+	s.mu.RUnlock()
+	token := r.Header.Get("Authorization")
 	if token != expected {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -168,7 +183,12 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		old.conn.Close()
 	}
 	conn := tunnel.NewConn(ws, nil)
-	entry := &clientEntry{machineName: machineName, conn: conn}
+	entry := &clientEntry{
+		machineName: machineName,
+		conn:        conn,
+		remoteAddr:  r.RemoteAddr,
+		connectedAt: time.Now(),
+	}
 	s.clients[machineName] = entry
 	s.mu.Unlock()
 
