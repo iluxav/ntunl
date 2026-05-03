@@ -434,7 +434,7 @@ function publicEndpoint(r, server, port) {
   }
   if (r.type === 'tcp') {
     if (!port) return '<span class="muted">—</span>';
-    return `<span class="tcp-addr">${esc(r.name)}.${esc(server)}:${port}</span>`;
+    return `<span class="tcp-addr">tcp.${esc(server)}:${port}</span>`;
   }
   return '<span class="muted">—</span>';
 }
