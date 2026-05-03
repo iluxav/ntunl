@@ -45,6 +45,14 @@
   .btn-add:hover { background: #254b75; }
   .empty { color: #555; text-align: center; padding: 2rem; }
   .error { color: #ef4444; font-size: 0.85rem; margin-top: 0.5rem; }
+
+  .auth-row { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #1f1f1f; }
+  .auth-row.disabled { opacity: 0.4; pointer-events: none; }
+  .auth-toggle { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.85rem; color: #ccc; user-select: none; }
+  .auth-toggle input { width: 14px; height: 14px; cursor: pointer; accent-color: #fbbf24; }
+  .auth-fields { margin-top: 0.85rem; }
+  .btn-secondary { background: #1a1a1a; border: 1px solid #333; color: #ccc; padding: 0.5rem 0.85rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; height: 36px; white-space: nowrap; font-family: inherit; }
+  .btn-secondary:hover { border-color: #555; }
 </style>
 </head>
 <body>
@@ -82,7 +90,7 @@
     </div>
     <div class="form-group">
       <label>Type</label>
-      <select id="type">
+      <select id="type" onchange="onTypeChange()">
         <option value="http">HTTP</option>
         <option value="tcp">TCP</option>
       </select>
@@ -92,6 +100,33 @@
       <input type="text" id="target" placeholder="localhost:3030">
     </div>
     <button class="btn-add" onclick="addRoute()">Add</button>
+  </div>
+
+  <div class="auth-row" id="auth-row">
+    <label class="auth-toggle">
+      <input type="checkbox" id="auth-enabled" onchange="onAuthToggle()">
+      <span>Require API key (HTTP only)</span>
+    </label>
+    <div class="auth-fields" id="auth-fields" style="display:none;">
+      <div class="form-row">
+        <div class="form-group" style="flex: 0 0 160px;">
+          <label>Scheme</label>
+          <select id="auth-scheme" onchange="onAuthSchemeChange()">
+            <option value="bearer">Bearer token</option>
+            <option value="header">Custom header</option>
+          </select>
+        </div>
+        <div class="form-group" id="auth-header-group" style="display:none;">
+          <label>Header name</label>
+          <input type="text" id="auth-header" placeholder="X-API-Key">
+        </div>
+        <div class="form-group">
+          <label id="auth-value-label">Token</label>
+          <input type="password" id="auth-value" placeholder="long random secret" autocomplete="new-password">
+        </div>
+        <button type="button" class="btn-secondary" onclick="generateToken()" title="Generate a random 32-byte hex token">Generate</button>
+      </div>
+    </div>
   </div>
   <div class="error" id="error"></div>
 </div>
@@ -161,20 +196,69 @@ function publicEndpoint(r, server, port) {
   return '<span class="muted">—</span>';
 }
 
+function onTypeChange() {
+  const isHttp = document.getElementById('type').value === 'http';
+  const row = document.getElementById('auth-row');
+  row.classList.toggle('disabled', !isHttp);
+  if (!isHttp) {
+    document.getElementById('auth-enabled').checked = false;
+    onAuthToggle();
+  }
+}
+
+function onAuthToggle() {
+  const on = document.getElementById('auth-enabled').checked;
+  document.getElementById('auth-fields').style.display = on ? '' : 'none';
+}
+
+function onAuthSchemeChange() {
+  const scheme = document.getElementById('auth-scheme').value;
+  document.getElementById('auth-header-group').style.display = scheme === 'header' ? '' : 'none';
+  document.getElementById('auth-value-label').textContent = scheme === 'bearer' ? 'Token' : 'Value';
+}
+
+function generateToken() {
+  // 32 random bytes → hex (matches server-side config.GenerateToken).
+  const buf = new Uint8Array(32);
+  crypto.getRandomValues(buf);
+  const hex = Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
+  document.getElementById('auth-value').value = hex;
+  document.getElementById('auth-value').type = 'text';
+}
+
 async function addRoute() {
   const errEl = document.getElementById('error');
   errEl.textContent = '';
   const body = {
-    name: document.getElementById('name').value,
+    name: document.getElementById('name').value.trim(),
     type: document.getElementById('type').value,
-    target: document.getElementById('target').value,
+    target: document.getElementById('target').value.trim(),
   };
   if (!body.name || !body.target) { errEl.textContent = 'Name and target are required'; return; }
+
+  if (body.type === 'http' && document.getElementById('auth-enabled').checked) {
+    const scheme = document.getElementById('auth-scheme').value;
+    const value = document.getElementById('auth-value').value;
+    if (!value) { errEl.textContent = 'Auth value is required when API key is enabled'; return; }
+    if (scheme === 'bearer') {
+      body.auth = { bearer: value };
+    } else {
+      const header = document.getElementById('auth-header').value.trim();
+      if (!header) { errEl.textContent = 'Header name is required for custom-header auth'; return; }
+      body.auth = { header, value };
+    }
+  }
+
   try {
     const res = await fetch('/api/routes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     if (!res.ok) { errEl.textContent = await res.text(); return; }
     document.getElementById('name').value = '';
     document.getElementById('target').value = '';
+    document.getElementById('auth-enabled').checked = false;
+    document.getElementById('auth-header').value = '';
+    document.getElementById('auth-value').value = '';
+    document.getElementById('auth-value').type = 'password';
+    onAuthToggle();
     load();
   } catch(e) { errEl.textContent = e.message; }
 }
