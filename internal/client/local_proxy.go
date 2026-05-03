@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/iluxav/ntunl/internal/config"
+	"github.com/iluxav/ntunl/internal/tunnel"
 )
 
 type LocalProxy struct {
@@ -59,6 +60,14 @@ func (lp *LocalProxy) startHTTP() {
 		if route == nil {
 			http.Error(w, "route not found: "+subdomain, http.StatusNotFound)
 			return
+		}
+
+		if route.Auth != nil {
+			wireAuth := &tunnel.RouteAuth{Bearer: route.Auth.Bearer, Header: route.Auth.Header, Value: route.Auth.Value}
+			if !wireAuth.Check(r) {
+				wireAuth.WriteUnauthorized(w)
+				return
+			}
 		}
 
 		target, err := url.Parse("http://" + route.Target)

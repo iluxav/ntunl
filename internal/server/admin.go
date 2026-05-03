@@ -17,6 +17,24 @@ import (
 //go:embed web/admin.html
 var adminWebFS embed.FS
 
+// routeView is the admin-facing form of a RouteInfo. The auth secret
+// itself is never serialised; only a "scheme" label is exposed so the
+// dashboard can show whether protection is on and what kind.
+type routeView struct {
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	LocalPort int    `json:"local_port,omitempty"`
+	Auth      string `json:"auth,omitempty"` // "" | "bearer" | "<header-name>"
+}
+
+func redactRouteInfos(routes []tunnel.RouteInfo) []routeView {
+	out := make([]routeView, len(routes))
+	for i, r := range routes {
+		out[i] = routeView{Name: r.Name, Type: r.Type, LocalPort: r.LocalPort, Auth: r.Auth.Scheme()}
+	}
+	return out
+}
+
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	user := s.cfg.AdminUser
@@ -141,13 +159,11 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	machines := make([]map[string]any, 0, len(s.clients))
 	for _, e := range s.clients {
-		routes := make([]tunnel.RouteInfo, len(e.routes))
-		copy(routes, e.routes)
 		machines = append(machines, map[string]any{
 			"machine_name": e.machineName,
 			"remote_addr":  e.remoteAddr,
 			"connected_at": e.connectedAt.UTC().Format(time.RFC3339),
-			"routes":       routes,
+			"routes":       redactRouteInfos(e.routes),
 		})
 	}
 	tcpPorts := make(map[string]int, len(s.tcpListeners))

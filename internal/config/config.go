@@ -29,6 +29,36 @@ type Route struct {
 	Type      string `yaml:"type" json:"type"`
 	Target    string `yaml:"target" json:"target"`
 	LocalPort int    `yaml:"local_port,omitempty" json:"local_port,omitempty"`
+	Auth      *Auth  `yaml:"auth,omitempty" json:"auth,omitempty"`
+}
+
+// Auth describes optional API-key protection for an HTTP route. Either
+// Bearer is set (checks "Authorization: Bearer <Bearer>") OR Header+Value
+// are both set (checks "<Header>: <Value>"). Setting both forms is invalid.
+type Auth struct {
+	Bearer string `yaml:"bearer,omitempty" json:"bearer,omitempty"`
+	Header string `yaml:"header,omitempty" json:"header,omitempty"`
+	Value  string `yaml:"value,omitempty" json:"value,omitempty"`
+}
+
+// Validate reports whether the auth block is well-formed. Caller is
+// responsible for checking that the parent route is HTTP.
+func (a *Auth) Validate() error {
+	if a == nil {
+		return nil
+	}
+	hasBearer := a.Bearer != ""
+	hasHeader := a.Header != "" || a.Value != ""
+	if !hasBearer && !hasHeader {
+		return fmt.Errorf("auth: must set either bearer or header+value")
+	}
+	if hasBearer && hasHeader {
+		return fmt.Errorf("auth: set either bearer or header+value, not both")
+	}
+	if hasHeader && (a.Header == "" || a.Value == "") {
+		return fmt.Errorf("auth: custom header form requires both header and value")
+	}
+	return nil
 }
 
 type ClientConfig struct {
@@ -66,7 +96,24 @@ func LoadClientConfig(path string) (*ClientConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	for i := range cfg.Routes {
+		if err := cfg.Routes[i].validate(); err != nil {
+			return nil, fmt.Errorf("route %q: %w", cfg.Routes[i].Name, err)
+		}
+	}
 	return &cfg, nil
+}
+
+func (r *Route) validate() error {
+	if r.Auth != nil {
+		if r.Type != "http" {
+			return fmt.Errorf("auth is only supported on http routes")
+		}
+		if err := r.Auth.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func LoadServerConfig(path string) (*ServerConfig, error) {

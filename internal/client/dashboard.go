@@ -16,6 +16,31 @@ import (
 //go:embed web/index.html
 var webFS embed.FS
 
+// routeView is the redacted shape of a route sent to the dashboard. The
+// auth secret value is never serialised; only the "scheme" label is.
+type routeView struct {
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Target    string `json:"target"`
+	LocalPort int    `json:"local_port,omitempty"`
+	Auth      string `json:"auth,omitempty"` // "" | "bearer" | "<header-name>"
+}
+
+func redactRoutes(routes []config.Route) []routeView {
+	out := make([]routeView, len(routes))
+	for i, r := range routes {
+		out[i] = routeView{Name: r.Name, Type: r.Type, Target: r.Target, LocalPort: r.LocalPort}
+		if r.Auth != nil {
+			if r.Auth.Bearer != "" {
+				out[i].Auth = "bearer"
+			} else {
+				out[i].Auth = r.Auth.Header
+			}
+		}
+	}
+	return out
+}
+
 func (c *Client) basicAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, pass, ok := r.BasicAuth()
@@ -59,7 +84,7 @@ func (c *Client) startDashboard(addr string) {
 		case http.MethodGet:
 			cfg := c.watcher.Config()
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cfg.Routes)
+			json.NewEncoder(w).Encode(redactRoutes(cfg.Routes))
 
 		case http.MethodPost:
 			var route config.Route
@@ -78,6 +103,16 @@ func (c *Client) startDashboard(addr string) {
 			}
 			if route.Type == "" {
 				route.Type = "http"
+			}
+			if route.Auth != nil {
+				if route.Type != "http" {
+					http.Error(w, "auth is only supported on http routes", http.StatusBadRequest)
+					return
+				}
+				if err := route.Auth.Validate(); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
 			}
 
 			cfg := c.watcher.Config()

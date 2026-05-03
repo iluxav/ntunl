@@ -14,6 +14,25 @@ routes:
     type: http
     target: localhost:3000
 
+  # Optional API-key protection on http routes. Pick ONE form per route.
+  # Both forms are checked at the tunnel server (early reject) and at the
+  # local proxy on this machine (LAN access).
+  #
+  # Form A: standard Authorization: Bearer <token>
+  # - name: api
+  #   type: http
+  #   target: localhost:8080
+  #   auth:
+  #     bearer: "replace-with-a-long-random-secret"
+  #
+  # Form B: custom header name + value
+  # - name: webhook
+  #   type: http
+  #   target: localhost:9000
+  #   auth:
+  #     header: "X-API-Key"
+  #     value: "replace-with-a-long-random-secret"
+
   - name: db1
     type: tcp
     target: localhost:5432

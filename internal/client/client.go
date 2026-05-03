@@ -146,9 +146,17 @@ func configToRouteInfo(routes []config.Route) []tunnel.RouteInfo {
 			Name:      r.Name,
 			Type:      r.Type,
 			LocalPort: r.LocalPort,
+			Auth:      authToWire(r.Auth),
 		}
 	}
 	return infos
+}
+
+func authToWire(a *config.Auth) *tunnel.RouteAuth {
+	if a == nil {
+		return nil
+	}
+	return &tunnel.RouteAuth{Bearer: a.Bearer, Header: a.Header, Value: a.Value}
 }
 
 func backoff(attempt int) time.Duration {

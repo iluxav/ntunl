@@ -37,6 +37,8 @@
   .type { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; }
   .type.http { background: #1e3a5f; color: #60a5fa; }
   .type.tcp { background: #3b1f1f; color: #f87171; }
+  .auth-badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; background: #2a1f0a; color: #fbbf24; border: 1px solid #4a3a1a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; vertical-align: middle; }
+  .auth-badge .label { color: #b8860b; margin-right: 4px; font-weight: 500; }
 
   .endpoint a { color: #60a5fa; text-decoration: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .endpoint a:hover { text-decoration: underline; }
@@ -409,7 +411,7 @@ function renderMachines(machines, tcpPorts, publicDomain) {
     const rows = (m.routes || []).map(r => {
       const port = tcpPorts[r.name];
       return `<tr>
-        <td><strong>${esc(r.name)}</strong></td>
+        <td><strong>${esc(r.name)}</strong>${authBadge(r.auth)}</td>
         <td><span class="type ${esc(r.type)}">${esc(r.type)}</span></td>
         <td>${esc(r.target || '')}</td>
         <td>${r.type === 'tcp' ? (port || '<span class="muted">pending</span>') : '<span class="muted">—</span>'}</td>
@@ -437,6 +439,12 @@ function publicEndpoint(r, server, port) {
     return `<span class="tcp-addr">tcp.${esc(server)}:${port}</span>`;
   }
   return '<span class="muted">—</span>';
+}
+
+function authBadge(auth) {
+  if (!auth) return '';
+  const scheme = auth === 'bearer' ? 'Bearer' : auth;
+  return `<span class="auth-badge" title="API key required (${esc(scheme)})"><span class="label">auth</span>${esc(scheme)}</span>`;
 }
 
 function formatSince(iso) {

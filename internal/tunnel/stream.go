@@ -8,9 +8,18 @@ import (
 )
 
 type RouteInfo struct {
-	Name      string `json:"name"`
-	Type      string `json:"type"` // "http" or "tcp"
-	LocalPort int    `json:"local_port,omitempty"`
+	Name      string     `json:"name"`
+	Type      string     `json:"type"` // "http" or "tcp"
+	LocalPort int        `json:"local_port,omitempty"`
+	Auth      *RouteAuth `json:"auth,omitempty"`
+}
+
+// RouteAuth is the wire form of an optional API-key check. Either Bearer
+// is set, or Header+Value are both set. See config.Auth for details.
+type RouteAuth struct {
+	Bearer string `json:"bearer,omitempty"`
+	Header string `json:"header,omitempty"`
+	Value  string `json:"value,omitempty"`
 }
 
 type StreamOpenPayload struct {

@@ -29,6 +29,8 @@
   .type { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
   .type.http { background: #1e3a5f; color: #60a5fa; }
   .type.tcp { background: #3b1f1f; color: #f87171; }
+  .auth-badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; background: #2a1f0a; color: #fbbf24; border: 1px solid #4a3a1a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: none; letter-spacing: 0; vertical-align: middle; }
+  .auth-badge .label { color: #b8860b; margin-right: 4px; font-weight: 500; }
   .btn-remove { background: none; border: 1px solid #333; color: #888; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
   .btn-remove:hover { border-color: #ef4444; color: #ef4444; }
 
@@ -129,7 +131,7 @@ async function load() {
       const port = tcpPorts[r.name];
       const endpoint = publicEndpoint(r, server, port);
       return `<tr>
-        <td><strong>${esc(r.name)}</strong></td>
+        <td><strong>${esc(r.name)}</strong>${authBadge(r.auth)}</td>
         <td><span class="type ${r.type}">${r.type}</span></td>
         <td>${esc(r.target)}</td>
         <td>${r.type === 'tcp' ? (port || '<span class="muted">pending</span>') : '<span class="muted">—</span>'}</td>
@@ -138,6 +140,12 @@ async function load() {
       </tr>`;
     }).join('');
   } catch(e) {}
+}
+
+function authBadge(auth) {
+  if (!auth) return '';
+  const scheme = auth === 'bearer' ? 'Bearer' : auth;
+  return `<span class="auth-badge" title="API key required (${esc(scheme)})"><span class="label">auth</span>${esc(scheme)}</span>`;
 }
 
 function publicEndpoint(r, server, port) {

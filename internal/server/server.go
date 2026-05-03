@@ -128,12 +128,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	machines := make([]map[string]any, 0, len(s.clients))
 	totalRoutes := 0
 	for _, e := range s.clients {
-		routes := make([]tunnel.RouteInfo, len(e.routes))
-		copy(routes, e.routes)
-		totalRoutes += len(routes)
+		totalRoutes += len(e.routes)
 		machines = append(machines, map[string]any{
 			"machine_name": e.machineName,
-			"routes":       routes,
+			"routes":       redactRouteInfos(e.routes),
 		})
 	}
 	tcpPorts := make(map[string]int, len(s.tcpListeners))
