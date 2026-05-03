@@ -77,7 +77,7 @@ func (s *Server) serveTCP(ctx context.Context, ln net.Listener, routeName string
 func (s *Server) handlePlainTCPConn(c net.Conn, routeName string) {
 	defer c.Close()
 
-	route, tunnelConn := s.findRoute(routeName)
+	route, machine, tunnelConn := s.findRoute(routeName)
 	if route == nil || tunnelConn == nil {
 		log.Printf("no tunnel connection for TCP route %s", routeName)
 		return
@@ -89,6 +89,9 @@ func (s *Server) handlePlainTCPConn(c net.Conn, routeName string) {
 		return
 	}
 	defer tunnelConn.Mux().CloseStream(stream.ID)
+
+	s.metrics.OpenConn(machine, routeName, "tcp")
+	defer s.metrics.CloseConn(machine, routeName, "tcp")
 
 	done := make(chan struct{})
 
@@ -102,6 +105,7 @@ func (s *Server) handlePlainTCPConn(c net.Conn, routeName string) {
 				if sendErr := tunnelConn.Mux().SendData(stream.ID, buf[:n]); sendErr != nil {
 					return
 				}
+				s.metrics.RecordBytesIn(machine, routeName, "tcp", n)
 			}
 			if err != nil {
 				return
@@ -119,6 +123,7 @@ func (s *Server) handlePlainTCPConn(c net.Conn, routeName string) {
 			if _, err := c.Write(data); err != nil {
 				return
 			}
+			s.metrics.RecordBytesOut(machine, routeName, "tcp", len(data))
 		case <-stream.Done:
 			return
 		case <-done:

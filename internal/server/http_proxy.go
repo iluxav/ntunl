@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/iluxav/ntunl/internal/tunnel"
 )
@@ -18,7 +19,7 @@ func (s *Server) handleHTTPProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	route, conn := s.findRoute(subdomain)
+	route, machine, conn := s.findRoute(subdomain)
 	if route == nil {
 		http.Error(w, "route not found: "+subdomain, http.StatusNotFound)
 		return
@@ -33,9 +34,11 @@ func (s *Server) handleHTTPProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isWebSocketUpgrade(r) {
-		s.handleWebSocketProxy(w, r, conn, subdomain)
+		s.handleWebSocketProxy(w, r, conn, machine, subdomain)
 		return
 	}
+
+	requestStart := time.Now()
 
 	stream, err := conn.Mux().OpenStream(subdomain)
 	if err != nil {
@@ -62,6 +65,7 @@ func (s *Server) handleHTTPProxy(w http.ResponseWriter, r *http.Request) {
 				if sendErr := conn.Mux().SendData(stream.ID, buf[:n]); sendErr != nil {
 					return
 				}
+				s.metrics.RecordBytesIn(machine, subdomain, "http", n)
 			}
 			if err != nil {
 				return
@@ -82,6 +86,7 @@ func (s *Server) handleHTTPProxy(w http.ResponseWriter, r *http.Request) {
 				if _, err := respPW.Write(data); err != nil {
 					return
 				}
+				s.metrics.RecordBytesOut(machine, subdomain, "http", len(data))
 			case <-stream.Done:
 				return
 			}
@@ -104,6 +109,7 @@ func (s *Server) handleHTTPProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+	s.metrics.RecordHTTPRequest(machine, subdomain, time.Since(requestStart))
 }
 
 func extractSubdomain(host string) string {
@@ -131,7 +137,7 @@ func isWebSocketUpgrade(r *http.Request) bool {
 	return false
 }
 
-func (s *Server) handleWebSocketProxy(w http.ResponseWriter, r *http.Request, conn *tunnel.Conn, subdomain string) {
+func (s *Server) handleWebSocketProxy(w http.ResponseWriter, r *http.Request, conn *tunnel.Conn, machine, subdomain string) {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "websocket: response writer not hijackable", http.StatusInternalServerError)
@@ -158,10 +164,14 @@ func (s *Server) handleWebSocketProxy(w http.ResponseWriter, r *http.Request, co
 	}
 	defer clientConn.Close()
 
+	s.metrics.OpenConn(machine, subdomain, "ws")
+	defer s.metrics.CloseConn(machine, subdomain, "ws")
+
 	if err := conn.Mux().SendData(stream.ID, reqBuf.Bytes()); err != nil {
 		log.Printf("websocket: send request to tunnel: %v", err)
 		return
 	}
+	s.metrics.RecordBytesIn(machine, subdomain, "ws", reqBuf.Len())
 
 	done := make(chan struct{})
 
@@ -175,6 +185,7 @@ func (s *Server) handleWebSocketProxy(w http.ResponseWriter, r *http.Request, co
 				if sendErr := conn.Mux().SendData(stream.ID, buf); sendErr != nil {
 					return
 				}
+				s.metrics.RecordBytesIn(machine, subdomain, "ws", n)
 			}
 		}
 		buf := make([]byte, 32*1024)
@@ -184,6 +195,7 @@ func (s *Server) handleWebSocketProxy(w http.ResponseWriter, r *http.Request, co
 				if sendErr := conn.Mux().SendData(stream.ID, buf[:n]); sendErr != nil {
 					return
 				}
+				s.metrics.RecordBytesIn(machine, subdomain, "ws", n)
 			}
 			if err != nil {
 				return
@@ -201,6 +213,7 @@ func (s *Server) handleWebSocketProxy(w http.ResponseWriter, r *http.Request, co
 			if _, err := clientConn.Write(data); err != nil {
 				return
 			}
+			s.metrics.RecordBytesOut(machine, subdomain, "ws", len(data))
 		case <-stream.Done:
 			return
 		case <-done:

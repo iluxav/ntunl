@@ -34,6 +34,7 @@ type Server struct {
 	cfg      *config.ServerConfig
 	cfgPath  string
 	upgrader websocket.Upgrader
+	metrics  *Registry
 
 	mu           sync.RWMutex
 	clients      map[string]*clientEntry
@@ -51,6 +52,7 @@ func New(cfg *config.ServerConfig, cfgPath string) *Server {
 	return &Server{
 		cfg:     cfg,
 		cfgPath: cfgPath,
+		metrics: NewRegistry(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -233,19 +235,19 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 // findRoute locates a route by subdomain across all connected machines
-// and returns the route info along with the owning machine's tunnel conn.
-func (s *Server) findRoute(name string) (*tunnel.RouteInfo, *tunnel.Conn) {
+// and returns the route info, owning machine name, and tunnel conn.
+func (s *Server) findRoute(name string) (*tunnel.RouteInfo, string, *tunnel.Conn) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, entry := range s.clients {
 		for i := range entry.routes {
 			if entry.routes[i].Name == name {
 				rt := entry.routes[i]
-				return &rt, entry.conn
+				return &rt, entry.machineName, entry.conn
 			}
 		}
 	}
-	return nil, nil
+	return nil, "", nil
 }
 
 // findOwnerLocked returns the machine name that owns a given route, or "".

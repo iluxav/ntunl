@@ -66,11 +66,20 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/api/status":
 		s.adminStatus(w, r)
+	case "/api/metrics":
+		s.adminMetrics(w, r)
 	case "/api/rotate-token":
 		s.adminRotateToken(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *Server) adminMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"routes": s.metrics.Snapshot(),
+	})
 }
 
 func (s *Server) adminSetup(w http.ResponseWriter, r *http.Request) {

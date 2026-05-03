@@ -70,6 +70,19 @@
   .setup .err { color: #f87171; font-size: 0.85rem; margin-top: 0.4rem; min-height: 1.2em; }
   .setup .ok { color: #4ade80; font-size: 0.85rem; margin-top: 0.4rem; }
   .hidden { display: none !important; }
+
+  .stats { display: flex; flex-wrap: wrap; gap: 1.4rem; margin-bottom: 1rem; padding-bottom: 0.85rem; border-bottom: 1px solid #1f1f1f; }
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+  .stat .label { font-size: 0.7rem; color: #777; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat .value { font-size: 1.05rem; color: #e8e8e8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .stat .value.in { color: #fbbf24; }
+  .stat .value.out { color: #60a5fa; }
+  .traffic-table th { white-space: nowrap; }
+  .traffic-table td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
+  .traffic-table td.name { font-family: inherit; font-weight: 600; }
+  .spark { display: inline-block; vertical-align: middle; }
+  .spark .in { stroke: #fbbf24; }
+  .spark .out { stroke: #60a5fa; }
 </style>
 </head>
 <body>
@@ -112,6 +125,34 @@
     </div>
   </div>
   <div class="token-value masked" id="token">—</div>
+</div>
+
+<div class="section">
+  <div class="section-header"><h2>Traffic</h2></div>
+  <div class="stats" id="traffic-stats">
+    <div class="stat"><span class="label">Requests</span><span class="value" id="t-requests">0</span></div>
+    <div class="stat"><span class="label">Active conns</span><span class="value" id="t-active">0</span></div>
+    <div class="stat"><span class="label">Total conns</span><span class="value" id="t-total">0</span></div>
+    <div class="stat"><span class="label">In (↓)</span><span class="value in" id="t-in">0 B</span></div>
+    <div class="stat"><span class="label">Out (↑)</span><span class="value out" id="t-out">0 B</span></div>
+  </div>
+  <table class="traffic-table" id="traffic-table">
+    <thead>
+      <tr>
+        <th>Subdomain</th>
+        <th>Type</th>
+        <th>Machine</th>
+        <th>Reqs</th>
+        <th>Active / Total</th>
+        <th>In ↓</th>
+        <th>Out ↑</th>
+        <th>Avg lat</th>
+        <th>Max lat</th>
+        <th>Last hour</th>
+      </tr>
+    </thead>
+    <tbody id="traffic-rows"></tbody>
+  </table>
 </div>
 
 <div class="section">
@@ -175,11 +216,98 @@ async function load() {
     const dom = data.public_domain || '—';
     document.getElementById('subtitle').textContent = `${n} machine${n !== 1 ? 's' : ''} connected · public domain: ${dom}`;
     renderMachines(data.machines || [], data.tcp_ports || {}, data.public_domain || '');
+    loadMetrics();
     if (!pollTimer) pollTimer = setInterval(load, 5000);
   } catch (e) {
     showDashboard();
     document.getElementById('subtitle').textContent = 'Unable to reach server: ' + (e.message || e);
   }
+}
+
+async function loadMetrics() {
+  try {
+    const res = await fetch('/api/metrics');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderMetrics(data.routes || []);
+  } catch (e) {}
+}
+
+function renderMetrics(routes) {
+  let totReq = 0, totActive = 0, totTotal = 0, totIn = 0, totOut = 0;
+  for (const r of routes) {
+    totReq += r.requests || 0;
+    totActive += r.active_conns || 0;
+    totTotal += r.total_conns || 0;
+    totIn += r.bytes_in || 0;
+    totOut += r.bytes_out || 0;
+  }
+  document.getElementById('t-requests').textContent = totReq.toLocaleString();
+  document.getElementById('t-active').textContent = totActive.toLocaleString();
+  document.getElementById('t-total').textContent = totTotal.toLocaleString();
+  document.getElementById('t-in').textContent = fmtBytes(totIn);
+  document.getElementById('t-out').textContent = fmtBytes(totOut);
+
+  const tbody = document.getElementById('traffic-rows');
+  if (routes.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty">No traffic yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = routes.map(r => {
+    const avg = r.latency_count > 0 ? fmtMs(r.latency_avg_ms) : '<span class="muted">—</span>';
+    const max = r.latency_count > 0 ? fmtMs(r.latency_max_ms) : '<span class="muted">—</span>';
+    return `<tr>
+      <td class="name">${esc(r.route)}</td>
+      <td><span class="type ${esc(r.type)}">${esc(r.type)}</span></td>
+      <td>${esc(r.machine || '—')}</td>
+      <td>${(r.requests || 0).toLocaleString()}</td>
+      <td>${r.active_conns || 0} / ${(r.total_conns || 0).toLocaleString()}</td>
+      <td>${fmtBytes(r.bytes_in || 0)}</td>
+      <td>${fmtBytes(r.bytes_out || 0)}</td>
+      <td>${avg}</td>
+      <td>${max}</td>
+      <td>${sparkline(r.samples || [])}</td>
+    </tr>`;
+  }).join('');
+}
+
+function sparkline(samples, w = 130, h = 24) {
+  if (!samples || samples.length === 0) return '';
+  let max = 0;
+  for (const s of samples) {
+    const t = (s.bytes_in || 0) + (s.bytes_out || 0);
+    if (t > max) max = t;
+  }
+  if (max === 0) {
+    return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><line x1="0" y1="${h - 1}" x2="${w}" y2="${h - 1}" stroke="#2a2a2a"/></svg>`;
+  }
+  const inPts = [];
+  const outPts = [];
+  for (let i = 0; i < samples.length; i++) {
+    const x = (i / (samples.length - 1)) * (w - 2) + 1;
+    const yIn = h - 1 - ((samples[i].bytes_in || 0) / max) * (h - 2);
+    const yOut = h - 1 - ((samples[i].bytes_out || 0) / max) * (h - 2);
+    inPts.push(`${x.toFixed(1)},${yIn.toFixed(1)}`);
+    outPts.push(`${x.toFixed(1)},${yOut.toFixed(1)}`);
+  }
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <polyline class="in" points="${inPts.join(' ')}" fill="none" stroke-width="1.2"/>
+    <polyline class="out" points="${outPts.join(' ')}" fill="none" stroke-width="1.2"/>
+  </svg>`;
+}
+
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  return `${(n / (1024 * 1024 * 1024 * 1024)).toFixed(2)} TB`;
+}
+
+function fmtMs(ms) {
+  if (ms < 1) return `${ms.toFixed(2)} ms`;
+  if (ms < 1000) return `${ms.toFixed(1)} ms`;
+  return `${(ms / 1000).toFixed(2)} s`;
 }
 
 async function submitSetup(ev) {
