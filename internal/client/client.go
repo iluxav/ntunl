@@ -156,7 +156,14 @@ func authToWire(a *config.Auth) *tunnel.RouteAuth {
 	if a == nil {
 		return nil
 	}
-	return &tunnel.RouteAuth{Bearer: a.Bearer, Header: a.Header, Value: a.Value}
+	out := &tunnel.RouteAuth{Bearer: a.Bearer, Header: a.Header, Value: a.Value}
+	if len(a.Users) > 0 {
+		out.Users = make([]tunnel.RouteAuthUser, len(a.Users))
+		for i, u := range a.Users {
+			out.Users[i] = tunnel.RouteAuthUser{User: u.User, Password: u.Password}
+		}
+	}
+	return out
 }
 
 func backoff(attempt int) time.Duration {

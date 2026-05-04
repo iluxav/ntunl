@@ -27,7 +27,8 @@ func (a *RouteAuth) Check(r *http.Request) bool {
 	return true
 }
 
-// Scheme returns a short label for UI/logs ("bearer", "X-API-Key", or "").
+// Scheme returns a short label for UI/logs ("bearer", "session",
+// "X-API-Key", or "").
 func (a *RouteAuth) Scheme() string {
 	if a == nil {
 		return ""
@@ -35,7 +36,29 @@ func (a *RouteAuth) Scheme() string {
 	if a.Bearer != "" {
 		return "bearer"
 	}
+	if len(a.Users) > 0 {
+		return "session"
+	}
 	return a.Header
+}
+
+// HasSession reports whether this route uses cookie-session auth.
+// The caller is responsible for cookie validation; Check ignores Users.
+func (a *RouteAuth) HasSession() bool {
+	return a != nil && len(a.Users) > 0
+}
+
+// LookupUser returns the password for a given user, or "" if not found.
+func (a *RouteAuth) LookupUser(user string) string {
+	if a == nil {
+		return ""
+	}
+	for _, u := range a.Users {
+		if u.User == user {
+			return u.Password
+		}
+	}
+	return ""
 }
 
 // WriteUnauthorized sends a 401 with an appropriate WWW-Authenticate header.

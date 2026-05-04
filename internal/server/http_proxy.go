@@ -32,7 +32,11 @@ func (s *Server) handleHTTPProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "tunnel not connected", http.StatusBadGateway)
 		return
 	}
-	if !route.Auth.Check(r) {
+	if route.Auth.HasSession() {
+		if s.handleSessionAuth(w, r, route) {
+			return
+		}
+	} else if !route.Auth.Check(r) {
 		route.Auth.WriteUnauthorized(w)
 		return
 	}

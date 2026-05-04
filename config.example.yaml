@@ -14,9 +14,10 @@ routes:
     type: http
     target: localhost:3000
 
-  # Optional API-key protection on http routes. Pick ONE form per route.
-  # Both forms are checked at the tunnel server (early reject) and at the
-  # local proxy on this machine (LAN access).
+  # Optional protection on http routes. Pick ONE form per route.
+  # Forms A and B (API-key) are checked both at the tunnel server (early
+  # reject) and at the local proxy on this machine. Form C (session) is
+  # enforced only at the tunnel server; the local proxy leaves it open.
   #
   # Form A: standard Authorization: Bearer <token>
   # - name: api
@@ -32,6 +33,18 @@ routes:
   #   auth:
   #     header: "X-API-Key"
   #     value: "replace-with-a-long-random-secret"
+  #
+  # Form C: browser cookie session. Unauthenticated requests are
+  # redirected to /___login___ on the route's host; the proxy serves
+  # a login form there and sets a signed session cookie on success.
+  # Sign out with /___logout___.
+  # - name: app
+  #   type: http
+  #   target: localhost:3030
+  #   auth:
+  #     users:
+  #       - user: ilya
+  #         password: "change-me"
 
   - name: db1
     type: tcp

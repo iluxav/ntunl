@@ -12,7 +12,6 @@ import (
 	"sync"
 
 	"github.com/iluxav/ntunl/internal/config"
-	"github.com/iluxav/ntunl/internal/tunnel"
 )
 
 type LocalProxy struct {
@@ -63,8 +62,10 @@ func (lp *LocalProxy) startHTTP() {
 		}
 
 		if route.Auth != nil {
-			wireAuth := &tunnel.RouteAuth{Bearer: route.Auth.Bearer, Header: route.Auth.Header, Value: route.Auth.Value}
-			if !wireAuth.Check(r) {
+			wireAuth := authToWire(route.Auth)
+			// Session (cookie) auth is enforced by the public server only;
+			// the local proxy is reachable from this machine and is left open.
+			if !wireAuth.HasSession() && !wireAuth.Check(r) {
 				wireAuth.WriteUnauthorized(w)
 				return
 			}

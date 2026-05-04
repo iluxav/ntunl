@@ -14,12 +14,19 @@ type RouteInfo struct {
 	Auth      *RouteAuth `json:"auth,omitempty"`
 }
 
-// RouteAuth is the wire form of an optional API-key check. Either Bearer
-// is set, or Header+Value are both set. See config.Auth for details.
+// RouteAuth is the wire form of an optional auth check. Exactly one of
+// Bearer, Header+Value, or Users is set. See config.Auth for details.
 type RouteAuth struct {
-	Bearer string `json:"bearer,omitempty"`
-	Header string `json:"header,omitempty"`
-	Value  string `json:"value,omitempty"`
+	Bearer string          `json:"bearer,omitempty"`
+	Header string          `json:"header,omitempty"`
+	Value  string          `json:"value,omitempty"`
+	Users  []RouteAuthUser `json:"users,omitempty"`
+}
+
+// RouteAuthUser is one credential pair for cookie-session auth.
+type RouteAuthUser struct {
+	User     string `json:"user"`
+	Password string `json:"password"`
 }
 
 type StreamOpenPayload struct {

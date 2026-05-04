@@ -23,7 +23,7 @@ type routeView struct {
 	Type      string `json:"type"`
 	Target    string `json:"target"`
 	LocalPort int    `json:"local_port,omitempty"`
-	Auth      string `json:"auth,omitempty"` // "" | "bearer" | "<header-name>"
+	Auth      string `json:"auth,omitempty"` // "" | "bearer" | "session" | "<header-name>"
 }
 
 func redactRoutes(routes []config.Route) []routeView {
@@ -31,9 +31,12 @@ func redactRoutes(routes []config.Route) []routeView {
 	for i, r := range routes {
 		out[i] = routeView{Name: r.Name, Type: r.Type, Target: r.Target, LocalPort: r.LocalPort}
 		if r.Auth != nil {
-			if r.Auth.Bearer != "" {
+			switch {
+			case r.Auth.Bearer != "":
 				out[i].Auth = "bearer"
-			} else {
+			case len(r.Auth.Users) > 0:
+				out[i].Auth = "session"
+			default:
 				out[i].Auth = r.Auth.Header
 			}
 		}

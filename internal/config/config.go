@@ -32,13 +32,24 @@ type Route struct {
 	Auth      *Auth  `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
-// Auth describes optional API-key protection for an HTTP route. Either
-// Bearer is set (checks "Authorization: Bearer <Bearer>") OR Header+Value
-// are both set (checks "<Header>: <Value>"). Setting both forms is invalid.
+// Auth describes optional protection for an HTTP route. Exactly one of
+// three mutually-exclusive forms must be set:
+//
+//   - Bearer: checks "Authorization: Bearer <Bearer>" (API clients)
+//   - Header+Value: checks "<Header>: <Value>" (API clients)
+//   - Users: cookie-based browser session; the proxy serves a login form
+//     at /___login___ and validates a signed cookie on subsequent requests
 type Auth struct {
-	Bearer string `yaml:"bearer,omitempty" json:"bearer,omitempty"`
-	Header string `yaml:"header,omitempty" json:"header,omitempty"`
-	Value  string `yaml:"value,omitempty" json:"value,omitempty"`
+	Bearer string     `yaml:"bearer,omitempty" json:"bearer,omitempty"`
+	Header string     `yaml:"header,omitempty" json:"header,omitempty"`
+	Value  string     `yaml:"value,omitempty" json:"value,omitempty"`
+	Users  []AuthUser `yaml:"users,omitempty" json:"users,omitempty"`
+}
+
+// AuthUser is one credential pair for cookie-session auth.
+type AuthUser struct {
+	User     string `yaml:"user" json:"user"`
+	Password string `yaml:"password" json:"password"`
 }
 
 // Validate reports whether the auth block is well-formed. Caller is
@@ -49,14 +60,28 @@ func (a *Auth) Validate() error {
 	}
 	hasBearer := a.Bearer != ""
 	hasHeader := a.Header != "" || a.Value != ""
-	if !hasBearer && !hasHeader {
-		return fmt.Errorf("auth: must set either bearer or header+value")
+	hasUsers := len(a.Users) > 0
+	forms := 0
+	for _, on := range []bool{hasBearer, hasHeader, hasUsers} {
+		if on {
+			forms++
+		}
 	}
-	if hasBearer && hasHeader {
-		return fmt.Errorf("auth: set either bearer or header+value, not both")
+	if forms == 0 {
+		return fmt.Errorf("auth: must set bearer, header+value, or users")
+	}
+	if forms > 1 {
+		return fmt.Errorf("auth: set only one of bearer, header+value, or users")
 	}
 	if hasHeader && (a.Header == "" || a.Value == "") {
 		return fmt.Errorf("auth: custom header form requires both header and value")
+	}
+	if hasUsers {
+		for i, u := range a.Users {
+			if u.User == "" || u.Password == "" {
+				return fmt.Errorf("auth: users[%d] requires both user and password", i)
+			}
+		}
 	}
 	return nil
 }
@@ -72,6 +97,7 @@ type ServerConfig struct {
 	ListenHTTP     string `yaml:"listen_http"`
 	TCPPortRange   string `yaml:"tcp_port_range"`
 	Token          string `yaml:"token"`
+	SessionSecret  string `yaml:"session_secret,omitempty"`
 	AdminSubdomain string `yaml:"admin_subdomain,omitempty"`
 	AdminUser      string `yaml:"admin_user,omitempty"`
 	AdminPassword  string `yaml:"admin_password,omitempty"`
@@ -123,11 +149,16 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 		if terr != nil {
 			return nil, terr
 		}
+		sessionSecret, serr := GenerateToken()
+		if serr != nil {
+			return nil, serr
+		}
 		cfg := &ServerConfig{
 			ListenHTTP:     ":80",
 			TCPPortRange:   "15000-15100",
 			AdminSubdomain: "manage",
 			Token:          token,
+			SessionSecret:  sessionSecret,
 		}
 		if err := SaveServerConfig(path, cfg); err != nil {
 			return nil, fmt.Errorf("create default server config: %w", err)
@@ -150,14 +181,26 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if cfg.AdminSubdomain == "" {
 		cfg.AdminSubdomain = "manage"
 	}
+	persist := false
 	if cfg.Token == "" {
 		token, terr := GenerateToken()
 		if terr != nil {
 			return nil, terr
 		}
 		cfg.Token = token
+		persist = true
+	}
+	if cfg.SessionSecret == "" {
+		secret, serr := GenerateToken()
+		if serr != nil {
+			return nil, serr
+		}
+		cfg.SessionSecret = secret
+		persist = true
+	}
+	if persist {
 		if err := SaveServerConfig(path, &cfg); err != nil {
-			return nil, fmt.Errorf("persist generated token: %w", err)
+			return nil, fmt.Errorf("persist generated secrets: %w", err)
 		}
 	}
 	return &cfg, nil

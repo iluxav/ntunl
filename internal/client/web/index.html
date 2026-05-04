@@ -53,6 +53,14 @@
   .auth-fields { margin-top: 0.85rem; }
   .btn-secondary { background: #1a1a1a; border: 1px solid #333; color: #ccc; padding: 0.5rem 0.85rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; height: 36px; white-space: nowrap; font-family: inherit; }
   .btn-secondary:hover { border-color: #555; }
+  .users-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
+  .user-row { display: flex; gap: 0.5rem; align-items: center; }
+  .user-row input { flex: 1; background: #0a0a0a; border: 1px solid #333; color: #e0e0e0; padding: 0.45rem 0.55rem; border-radius: 4px; font-size: 0.85rem; }
+  .user-row input:focus { outline: none; border-color: #555; }
+  .user-row .btn-remove-user { background: none; border: 1px solid #333; color: #888; width: 28px; height: 28px; border-radius: 4px; cursor: pointer; font-size: 1rem; line-height: 1; display: flex; align-items: center; justify-content: center; }
+  .user-row .btn-remove-user:hover { border-color: #ef4444; color: #ef4444; }
+  .btn-add-user { margin-top: 0.5rem; background: #1a1a1a; border: 1px dashed #333; color: #888; padding: 0.4rem 0.85rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem; font-family: inherit; }
+  .btn-add-user:hover { border-color: #555; color: #ccc; }
 </style>
 </head>
 <body>
@@ -109,22 +117,27 @@
     </label>
     <div class="auth-fields" id="auth-fields" style="display:none;">
       <div class="form-row">
-        <div class="form-group" style="flex: 0 0 160px;">
+        <div class="form-group" style="flex: 0 0 200px;">
           <label>Scheme</label>
           <select id="auth-scheme" onchange="onAuthSchemeChange()">
             <option value="bearer">Bearer token</option>
             <option value="header">Custom header</option>
+            <option value="session">Session (browser login)</option>
           </select>
         </div>
         <div class="form-group" id="auth-header-group" style="display:none;">
           <label>Header name</label>
           <input type="text" id="auth-header" placeholder="X-API-Key">
         </div>
-        <div class="form-group">
+        <div class="form-group" id="auth-value-group">
           <label id="auth-value-label">Token</label>
           <input type="password" id="auth-value" placeholder="long random secret" autocomplete="new-password">
         </div>
-        <button type="button" class="btn-secondary" onclick="generateToken()" title="Generate a random 32-byte hex token">Generate</button>
+        <button type="button" class="btn-secondary" id="auth-generate-btn" onclick="generateToken()" title="Generate a random 32-byte hex token">Generate</button>
+      </div>
+      <div id="auth-users-group" style="display:none;">
+        <div class="users-list" id="auth-users-list"></div>
+        <button type="button" class="btn-add-user" onclick="addUserRow()">+ Add user</button>
       </div>
     </div>
   </div>
@@ -179,8 +192,11 @@ async function load() {
 
 function authBadge(auth) {
   if (!auth) return '';
-  const scheme = auth === 'bearer' ? 'Bearer' : auth;
-  return `<span class="auth-badge" title="API key required (${esc(scheme)})"><span class="label">auth</span>${esc(scheme)}</span>`;
+  let scheme, title;
+  if (auth === 'bearer') { scheme = 'Bearer'; title = 'API key required (Bearer)'; }
+  else if (auth === 'session') { scheme = 'Session'; title = 'Browser login required'; }
+  else { scheme = auth; title = `API key required (${auth})`; }
+  return `<span class="auth-badge" title="${esc(title)}"><span class="label">auth</span>${esc(scheme)}</span>`;
 }
 
 function publicEndpoint(r, server, port) {
@@ -213,8 +229,39 @@ function onAuthToggle() {
 
 function onAuthSchemeChange() {
   const scheme = document.getElementById('auth-scheme').value;
+  const isSession = scheme === 'session';
   document.getElementById('auth-header-group').style.display = scheme === 'header' ? '' : 'none';
+  document.getElementById('auth-value-group').style.display = isSession ? 'none' : '';
+  document.getElementById('auth-generate-btn').style.display = isSession ? 'none' : '';
+  document.getElementById('auth-users-group').style.display = isSession ? '' : 'none';
   document.getElementById('auth-value-label').textContent = scheme === 'bearer' ? 'Token' : 'Value';
+  if (isSession && document.getElementById('auth-users-list').children.length === 0) {
+    addUserRow();
+  }
+}
+
+function addUserRow(user = '', password = '') {
+  const list = document.getElementById('auth-users-list');
+  const row = document.createElement('div');
+  row.className = 'user-row';
+  row.innerHTML = `
+    <input type="text" class="user-name" placeholder="username" value="${esc(user)}" autocomplete="off">
+    <input type="text" class="user-pass" placeholder="password" value="${esc(password)}" autocomplete="off">
+    <button type="button" class="btn-remove-user" title="Remove">&times;</button>
+  `;
+  row.querySelector('.btn-remove-user').addEventListener('click', () => row.remove());
+  list.appendChild(row);
+}
+
+function collectUsers() {
+  const rows = document.querySelectorAll('#auth-users-list .user-row');
+  const users = [];
+  for (const row of rows) {
+    const u = row.querySelector('.user-name').value.trim();
+    const p = row.querySelector('.user-pass').value;
+    if (u && p) users.push({ user: u, password: p });
+  }
+  return users;
 }
 
 function generateToken() {
@@ -238,14 +285,20 @@ async function addRoute() {
 
   if (body.type === 'http' && document.getElementById('auth-enabled').checked) {
     const scheme = document.getElementById('auth-scheme').value;
-    const value = document.getElementById('auth-value').value;
-    if (!value) { errEl.textContent = 'Auth value is required when API key is enabled'; return; }
-    if (scheme === 'bearer') {
-      body.auth = { bearer: value };
+    if (scheme === 'session') {
+      const users = collectUsers();
+      if (users.length === 0) { errEl.textContent = 'At least one user (with password) is required for session auth'; return; }
+      body.auth = { users };
     } else {
-      const header = document.getElementById('auth-header').value.trim();
-      if (!header) { errEl.textContent = 'Header name is required for custom-header auth'; return; }
-      body.auth = { header, value };
+      const value = document.getElementById('auth-value').value;
+      if (!value) { errEl.textContent = 'Auth value is required when API key is enabled'; return; }
+      if (scheme === 'bearer') {
+        body.auth = { bearer: value };
+      } else {
+        const header = document.getElementById('auth-header').value.trim();
+        if (!header) { errEl.textContent = 'Header name is required for custom-header auth'; return; }
+        body.auth = { header, value };
+      }
     }
   }
 
@@ -258,6 +311,7 @@ async function addRoute() {
     document.getElementById('auth-header').value = '';
     document.getElementById('auth-value').value = '';
     document.getElementById('auth-value').type = 'password';
+    document.getElementById('auth-users-list').innerHTML = '';
     onAuthToggle();
     load();
   } catch(e) { errEl.textContent = e.message; }

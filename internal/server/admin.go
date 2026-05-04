@@ -24,7 +24,7 @@ type routeView struct {
 	Name      string `json:"name"`
 	Type      string `json:"type"`
 	LocalPort int    `json:"local_port,omitempty"`
-	Auth      string `json:"auth,omitempty"` // "" | "bearer" | "<header-name>"
+	Auth      string `json:"auth,omitempty"` // "" | "bearer" | "session" | "<header-name>"
 }
 
 func redactRouteInfos(routes []tunnel.RouteInfo) []routeView {
